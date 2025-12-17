@@ -57,6 +57,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await Promise.race([queryPromise, timeoutPromise]) as any;
       const { data, error } = result || {};
 
+      // Check for rocket badge (first login) - do this before checking for errors
+      try {
+        await supabase.rpc('check_rocket_badge', { user_uuid: userId });
+      } catch (badgeError) {
+        // Ignore badge errors (table might not exist yet)
+        console.warn('Could not check rocket badge:', badgeError);
+      }
+
       if (error) {
         // PGRST116 = no rows returned (profile doesn't exist yet) - this is normal
         // PGRST202 = function/table not found - table might not exist yet
