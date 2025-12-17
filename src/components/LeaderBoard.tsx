@@ -9,6 +9,7 @@ interface BuildingScore {
   change: number;
   streak: number;
   color: string;
+  
 }
 
 const Leaderboard = () => {
