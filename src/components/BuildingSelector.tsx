@@ -20,9 +20,11 @@ interface BuildingSelectorProps {
   selectedBuilding: string | null;
   onSelect: (id: string) => void;
   isDetecting: boolean;
+  hasLocationPermission: boolean;
+  userLocation: { lat: number; lon: number } | null;
 }
 
-const BuildingSelector = ({ buildings, selectedBuilding, onSelect, isDetecting }: BuildingSelectorProps) => {
+const BuildingSelector = ({ buildings, selectedBuilding, onSelect, isDetecting, hasLocationPermission, userLocation }: BuildingSelectorProps) => {
   const colorMap: Record<string, string> = {
     green: 'border-building-a text-building-a shadow-[0_0_20px_hsl(var(--building-a)/0.3)]',
     cyan: 'border-building-b text-building-b shadow-[0_0_20px_hsl(var(--building-b)/0.3)]',
@@ -45,13 +47,20 @@ const BuildingSelector = ({ buildings, selectedBuilding, onSelect, isDetecting }
         className="text-center space-y-2"
       >
         <h2 className="font-display text-2xl text-primary text-glow-sm">
-          {isDetecting ? '// LOCATING...' : '// SELECT BUILDING'}
+          {isDetecting ? '// LOCATING...' : hasLocationPermission ? '// SELECT BUILDING' : '// LOCATION REQUIRED'}
         </h2>
         <p className="text-muted-foreground text-sm">
           {isDetecting 
             ? 'Scanning for nearby buildings...' 
-            : 'Choose your building or enable location'}
+            : hasLocationPermission 
+              ? 'Select your building based on location'
+              : 'Enable location to select a building'}
         </p>
+        {!hasLocationPermission && !isDetecting && (
+          <p className="text-xs text-destructive/80 mt-2">
+            ⚠️ Gebouwen kunnen alleen worden geselecteerd via locatie detectie
+          </p>
+        )}
       </motion.div>
 
       <div className="grid grid-cols-2 gap-4 max-w-2xl mx-auto">
@@ -63,15 +72,23 @@ const BuildingSelector = ({ buildings, selectedBuilding, onSelect, isDetecting }
             transition={{ delay: index * 0.1 }}
           >
             <button
-              onClick={() => onSelect(building.id)}
+              onClick={() => {
+                // Alleen selecteren als er een geldige locatie is
+                if (hasLocationPermission && userLocation) {
+                  onSelect(building.id);
+                }
+              }}
+              disabled={!hasLocationPermission || !userLocation}
               className={`
                 relative w-full p-6 rounded-lg border-2 transition-all duration-300
                 ${colorMap[building.color]}
                 ${bgMap[building.color]}
                 ${selectedBuilding === building.id ? 'scale-105 ring-2 ring-offset-2 ring-offset-background' : ''}
                 ${building.isNear ? 'pulse-neon' : ''}
-                hover:scale-105 group
+                ${hasLocationPermission && userLocation ? 'hover:scale-105 cursor-pointer' : 'opacity-50 cursor-not-allowed'}
+                group
               `}
+              title={!hasLocationPermission || !userLocation ? 'Locatie vereist om gebouw te selecteren' : ''}
             >
               {building.isNear && (
                 <span className="absolute -top-2 -right-2 px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded-full font-bold">

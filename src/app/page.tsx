@@ -13,6 +13,7 @@ import Navigation from '@/components/Navigation';
 import UserProfile from '@/components/UserProfile';
 import { Button } from '@/components/ui/button';
 import { howestCampuses, isOnCampus } from '@/data/howestCampuses';
+import { useUsers } from '@/contexts/UserContext';
 
 type Tab = 'home' | 'chat' | 'challenges' | 'leaderboard' | 'profile';
 
@@ -45,10 +46,13 @@ const mapCampusesToBuildings = () => {
 };
 
 export default function Home() {
+  const { addUser, getUserCountForBuilding, totalConnectedUsers, connectedUsers } = useUsers();
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [isDetecting, setIsDetecting] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [hasLocationPermission, setHasLocationPermission] = useState(false);
   const [buildings, setBuildings] = useState(() => {
     // Initialize with fixed values to prevent hydration mismatch
     // Will be updated on client mount
@@ -76,59 +80,134 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
-  // Initialize random values only on client to prevent hydration mismatch
+  // Initialize buildings only on client to prevent hydration mismatch
   useEffect(() => {
     setIsMounted(true);
-    setBuildings(mapCampusesToBuildings());
+    // Update buildings met echte gebruikers counts
+    setBuildings(prevBuildings => 
+      prevBuildings.map(building => ({
+        ...building,
+        activeUsers: getUserCountForBuilding(building.id),
+      }))
+    );
   }, []);
 
+  // Update activeUsers wanneer connected users veranderen
+  useEffect(() => {
+    setBuildings(prevBuildings => 
+      prevBuildings.map(building => ({
+        ...building,
+        activeUsers: getUserCountForBuilding(building.id),
+      }))
+    );
+  }, [connectedUsers, getUserCountForBuilding]);
+
   const currentBuilding = buildings.find(b => b.id === selectedBuilding);
-  const onlineCount = buildings.reduce((acc, b) => acc + b.activeUsers, 0);
+  const onlineCount = totalConnectedUsers;
 
   const handleDetectLocation = () => {
     setIsDetecting(true);
+    setLocationError(null);
     
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude;
-          const lon = position.coords.longitude;
-          setUserLocation({ lat, lon });
-          
-          // Check welke campus het dichtstbij is
-          const { nearestCampus, isOnCampus: onCampus } = isOnCampus(lat, lon);
-          
-          // Update gebouwen met isNear status
-          setBuildings(prevBuildings => 
-            prevBuildings.map(building => ({
-              ...building,
-              isNear: building.id === nearestCampus?.id && onCampus,
-            }))
-          );
-          
-          // Selecteer automatisch de dichtstbijzijnde campus als je op campus bent
-          if (nearestCampus && onCampus) {
-            setSelectedBuilding(nearestCampus.id);
-          }
-          
-          setIsDetecting(false);
-        },
-        (error) => {
-          console.error('Geolocation error:', error);
-          setIsDetecting(false);
-          // Fallback: random selectie voor demo
-          const randomBuilding = buildings[Math.floor(Math.random() * buildings.length)];
-          setSelectedBuilding(randomBuilding.id);
-        }
-      );
-    } else {
-      // Fallback als geolocation niet beschikbaar is
-      setTimeout(() => {
-        setIsDetecting(false);
-        const randomBuilding = buildings[Math.floor(Math.random() * buildings.length)];
-        setSelectedBuilding(randomBuilding.id);
-      }, 2000);
+    // Check voor HTTPS (vereist voor geolocation in productie)
+    const isSecureContext = typeof window !== 'undefined' && 
+      (window.location.protocol === 'https:' || 
+       window.location.hostname === 'localhost' || 
+       window.location.hostname === '127.0.0.1');
+    
+    // Als we niet via HTTPS werken, toon duidelijke melding
+    if (!isSecureContext) {
+      const errorMsg = 'Geolocatie vereist HTTPS. Gebruik https:// of localhost om je locatie te detecteren.';
+      console.warn(errorMsg);
+      setLocationError(errorMsg);
+      setIsDetecting(false);
+      setHasLocationPermission(false);
+      return;
     }
+    
+    if (!navigator.geolocation) {
+      setLocationError('Geolocatie wordt niet ondersteund door je browser.');
+      setIsDetecting(false);
+      setHasLocationPermission(false);
+      return;
+    }
+
+    const options: PositionOptions = {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 60000, // Cache voor 1 minuut
+    };
+    
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        setUserLocation({ lat, lon });
+        setHasLocationPermission(true);
+        
+        // Check welke campus het dichtstbij is
+        const { nearestCampus, isOnCampus: onCampus } = isOnCampus(lat, lon);
+        
+        // Update gebouwen met isNear status
+        setBuildings(prevBuildings => 
+          prevBuildings.map(building => ({
+            ...building,
+            isNear: building.id === nearestCampus?.id && onCampus,
+          }))
+        );
+        
+        // Selecteer automatisch de dichtstbijzijnde campus als je op campus bent
+        if (nearestCampus && onCampus) {
+          setSelectedBuilding(nearestCampus.id);
+          // Voeg gebruiker toe aan context (alleen met geverifieerde locatie)
+          addUser(nearestCampus.id, true);
+        } else if (nearestCampus) {
+          // Niet op campus, maar wel dichtbij genoeg voor selectie
+          setSelectedBuilding(nearestCampus.id);
+          addUser(nearestCampus.id, true);
+        }
+        
+        setIsDetecting(false);
+      },
+      (error) => {
+        const errorCode = error?.code ?? 'UNKNOWN';
+        const errorMessage = error?.message ?? 'Geen error message beschikbaar';
+        
+        setIsDetecting(false);
+        setHasLocationPermission(false);
+        
+        // Specifieke error handling
+        let userErrorMessage: string | null = null;
+        
+        // Check voor HTTPS/secure origin error
+        if (errorMessage.includes('secure origins') || 
+            errorMessage.includes('Only secure origins') ||
+            errorMessage.includes('getCurrentPosition') && errorCode === 1) {
+          userErrorMessage = 'Geolocatie vereist HTTPS. Gebruik https:// of localhost om je locatie te detecteren.';
+        } else {
+          switch (errorCode) {
+            case 1: // PERMISSION_DENIED
+            case error?.PERMISSION_DENIED:
+              userErrorMessage = 'Geolocatie toegang geweigerd. Controleer je browser instellingen en geef toegang.';
+              break;
+            case 2: // POSITION_UNAVAILABLE
+            case error?.POSITION_UNAVAILABLE:
+              userErrorMessage = 'Locatie informatie niet beschikbaar. Controleer je GPS/WiFi instellingen.';
+              break;
+            case 3: // TIMEOUT
+            case error?.TIMEOUT:
+              userErrorMessage = 'Locatie request timeout. Probeer het opnieuw.';
+              break;
+            default:
+              userErrorMessage = 'Locatie kon niet worden bepaald. Zorg dat je HTTPS gebruikt of localhost.';
+          }
+        }
+        
+        setLocationError(userErrorMessage);
+        // GEEN fallback selectie - gebruiker moet locatie gebruiken
+      },
+      options
+    );
   };
 
   useEffect(() => {
@@ -155,25 +234,36 @@ export default function Home() {
               </p>
               
               {!selectedBuilding && (
-                <Button 
-                  onClick={handleDetectLocation}
-                  variant="neon"
-                  size="lg"
-                  disabled={isDetecting}
-                  className="mt-4"
-                >
-                  {isDetecting ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      SCANNING...
-                    </>
-                  ) : (
-                    <>
-                      <MapPin className="w-5 h-5" />
-                      DETECT MY BUILDING
-                    </>
+                <div className="flex flex-col items-center gap-4">
+                  <Button 
+                    onClick={handleDetectLocation}
+                    variant="neon"
+                    size="lg"
+                    disabled={isDetecting}
+                    className="mt-4"
+                  >
+                    {isDetecting ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        SCANNING...
+                      </>
+                    ) : (
+                      <>
+                        <MapPin className="w-5 h-5" />
+                        DETECT MY BUILDING
+                      </>
+                    )}
+                  </Button>
+                  {locationError && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="max-w-md px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm text-center"
+                    >
+                      {locationError}
+                    </motion.div>
                   )}
-                </Button>
+                </div>
               )}
             </motion.div>
 
@@ -181,8 +271,16 @@ export default function Home() {
             <BuildingSelector
               buildings={buildings}
               selectedBuilding={selectedBuilding}
-              onSelect={setSelectedBuilding}
+              onSelect={(id) => {
+                // Alleen selecteren als er een geldige locatie is
+                if (userLocation && hasLocationPermission) {
+                  setSelectedBuilding(id);
+                  addUser(id, true);
+                }
+              }}
               isDetecting={isDetecting}
+              hasLocationPermission={hasLocationPermission}
+              userLocation={userLocation}
             />
 
             {/* Quick stats when building selected */}
