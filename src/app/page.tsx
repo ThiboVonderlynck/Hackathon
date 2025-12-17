@@ -11,9 +11,12 @@ import DailyChallenges from '@/components/DailyChallenges';
 import Leaderboard from '@/components/Leaderboard';
 import Navigation from '@/components/Navigation';
 import UserProfile from '@/components/UserProfile';
+import LoginScreen from '@/components/LoginScreen';
+import ProfileSetup from '@/components/ProfileSetup';
 import { Button } from '@/components/ui/button';
 import { howestCampuses, isOnCampus } from '@/data/howestCampuses';
 import { useUsers } from '@/contexts/UserContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 type Tab = 'home' | 'chat' | 'challenges' | 'leaderboard' | 'profile';
 
@@ -47,12 +50,14 @@ const mapCampusesToBuildings = () => {
 
 export default function Home() {
   const { addUser, getUserCountForBuilding, totalConnectedUsers, connectedUsers } = useUsers();
+  const { user, profile, loading: authLoading } = useAuth();
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [isDetecting, setIsDetecting] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
+  const [profileSetupComplete, setProfileSetupComplete] = useState(false);
   const [buildings, setBuildings] = useState(() => {
     // Initialize with fixed values to prevent hydration mismatch
     // Will be updated on client mount
@@ -341,6 +346,28 @@ export default function Home() {
         return null;
     }
   };
+
+  // Show login screen if not authenticated
+  if (!authLoading && !user) {
+    return <LoginScreen />;
+  }
+
+  // Show profile setup if authenticated but no profile
+  if (!authLoading && user && !profile && !profileSetupComplete) {
+    return <ProfileSetup onComplete={() => setProfileSetupComplete(true)} />;
+  }
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground font-mono">LOADING...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background relative overflow-hidden">

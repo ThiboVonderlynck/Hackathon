@@ -115,3 +115,70 @@ $$ LANGUAGE plpgsql;
 -- Enable Realtime for the online_users table
 ALTER PUBLICATION supabase_realtime ADD TABLE online_users;
 
+-- Create profiles table for user profiles
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+  username TEXT NOT NULL,
+  avatar_url TEXT,
+  tag TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create index on user_id
+CREATE INDEX IF NOT EXISTS profiles_user_id_idx ON profiles(user_id);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+
+-- Policy: Anyone can read profiles
+CREATE POLICY "Anyone can read profiles"
+  ON profiles
+  FOR SELECT
+  USING (true);
+
+-- Policy: Users can insert their own profile
+CREATE POLICY "Users can insert their own profile"
+  ON profiles
+  FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+-- Policy: Users can update their own profile
+CREATE POLICY "Users can update their own profile"
+  ON profiles
+  FOR UPDATE
+  USING (auth.uid() = user_id);
+
+-- Enable Realtime for profiles table
+ALTER PUBLICATION supabase_realtime ADD TABLE profiles;
+
+-- Create storage bucket for avatars
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('avatars', 'avatars', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Storage policy: Anyone can view avatars
+CREATE POLICY "Anyone can view avatars"
+  ON storage.objects
+  FOR SELECT
+  USING (bucket_id = 'avatars');
+
+-- Storage policy: Authenticated users can upload avatars
+CREATE POLICY "Authenticated users can upload avatars"
+  ON storage.objects
+  FOR INSERT
+  WITH CHECK (bucket_id = 'avatars' AND auth.role() = 'authenticated');
+
+-- Storage policy: Users can update their own avatars
+CREATE POLICY "Users can update their own avatars"
+  ON storage.objects
+  FOR UPDATE
+  USING (bucket_id = 'avatars' AND auth.uid()::text = (storage.foldername(name))[1]);
+
+-- Storage policy: Users can delete their own avatars
+CREATE POLICY "Users can delete their own avatars"
+  ON storage.objects
+  FOR DELETE
+  USING (bucket_id = 'avatars' AND auth.uid()::text = (storage.foldername(name))[1]);
+

@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { UserProvider } from "@/contexts/UserContext";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -13,11 +14,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <UserProvider>
-          {children}
-          <Toaster />
-          <Sonner />
-        </UserProvider>
+        <AuthProvider>
+          <UserProvider>
+            {children}
+            <Toaster />
+            <Sonner />
+          </UserProvider>
+        </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
