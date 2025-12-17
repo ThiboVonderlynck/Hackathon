@@ -6,9 +6,12 @@ import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
+import { useBadges } from '@/hooks/useBadges';
+import Badge from './Badge';
 
 const UserProfile = () => {
   const { profile, signOut, user, updateProfile } = useAuth();
+  const { badges, loading: badgesLoading } = useBadges();
   const [showSettings, setShowSettings] = useState(false);
   const [displayName, setDisplayName] = useState<string>("");
   const [tag, setTag] = useState<string>("");
@@ -17,19 +20,11 @@ const UserProfile = () => {
   const [publicProfile, setPublicProfile] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
   const stats = [
     { label: 'Points', value: '1,234', icon: <Trophy className="w-4 h-4" /> },
     { label: 'Challenges', value: '47', icon: <Target className="w-4 h-4" /> },
     { label: 'Streak', value: '5 days', icon: <Flame className="w-4 h-4" /> },
-  ];
-
-  const badges = [
-    { id: '1', name: 'Early Adopter', icon: '🚀', earned: true },
-    { id: '2', name: 'Meme Lord', icon: '😂', earned: true },
-    { id: '3', name: 'Social Butterfly', icon: '🦋', earned: true },
-    { id: '4', name: 'Code Ninja', icon: '🥷', earned: false },
-    { id: '5', name: 'Night Owl', icon: '🦉', earned: false },
-    { id: '6', name: 'Team Player', icon: '🤝', earned: true },
   ];
 
   const recentActivity = [
@@ -49,15 +44,14 @@ const UserProfile = () => {
     setSaveMessage(null);
 
     try {
-      // For now we just call updateProfile. You can wire this to Supabase later.
       await updateProfile({
         username: displayName || undefined,
         tag: tag || undefined,
       });
-      setSaveMessage("Settings saved locally. Connect Supabase to persist them.");
+      setSaveMessage("Settings saved successfully!");
     } catch (error) {
       console.error(error);
-      setSaveMessage("Could not save settings, but your changes are kept locally.");
+      setSaveMessage("Could not save settings. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -156,23 +150,15 @@ const UserProfile = () => {
               </span>
             </div>
             <div className="grid grid-cols-6 gap-2">
-              {badges.map((badge) => (
-                <div
-                  key={badge.id}
-                  className={`
-                    aspect-square rounded-lg flex items-center justify-center text-2xl
-                    transition-all duration-300 cursor-pointer
-                    ${
-                      badge.earned
-                        ? "bg-card border border-primary/30 hover:scale-110"
-                        : "bg-muted/50 opacity-30 grayscale"
-                    }
-                  `}
-                  title={badge.name}
-                >
-                  {badge.icon}
+              {badgesLoading ? (
+                <div className="col-span-6 text-center text-muted-foreground text-sm py-4">
+                  Loading badges...
                 </div>
-              ))}
+              ) : (
+                badges.map((badge) => (
+                  <Badge key={badge.id} badge={badge} />
+                ))
+              )}
             </div>
           </motion.div>
 

@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useUsers } from '@/contexts/UserContext';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
+import { trackGamePlay, trackChallenge } from '@/utils/badgeHelpers';
 
 interface DrawingData {
   participant_id: string;
@@ -200,6 +201,11 @@ const ArtDuel = () => {
 
         channelRef.current = channel;
         setLoading(false);
+
+        // Track game play for badge
+        if (user) {
+          trackGamePlay(user.id, 'art-duel');
+        }
       } catch (err: any) {
         setError(err.message || 'Failed to initialize game.');
         setLoading(false);
@@ -261,6 +267,11 @@ const ArtDuel = () => {
         .from('art_duel_sessions')
         .update({ completed_at: new Date().toISOString() })
         .eq('id', sessionId);
+
+      // Track challenge completion
+      if (user) {
+        trackChallenge(user.id, 'art-duel');
+      }
 
       // Navigate to voting page (session param is optional, shows all today's drawings)
       router.push('/games/art-duel/vote');
