@@ -3,7 +3,7 @@
  */
 
 // Common profanity words (basic list - can be expanded)
-const PROFANITY_WORDS = [
+const PROFANITY_WORDS: string[] = [
   // Add common profanity here - keeping it minimal for demo
   // In production, use a proper profanity filter library
 ];
