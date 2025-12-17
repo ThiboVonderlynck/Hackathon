@@ -15,6 +15,7 @@ interface MemeSubmission {
   fileName?: string;
   fileType?: string;
   fileSize?: number;
+  fileUrl?: string; // Data URL for local storage
   createdAt: number;
 }
 
@@ -28,6 +29,10 @@ type MemeFeedItem = MemeSubmission & {
   votes: number;
 };
 
+// Use fixed timestamps to prevent hydration mismatch
+// Base timestamp: Dec 17, 2024 12:00:00 UTC
+const BASE_TIMESTAMP = new Date("2024-12-17T12:00:00Z").getTime();
+
 const DEMO_MEMES: MemeFeedItem[] = [
   {
     id: "demo-1",
@@ -36,7 +41,7 @@ const DEMO_MEMES: MemeFeedItem[] = [
     fileName: "wifi-deadline.png",
     fileType: "image/png",
     fileSize: 420_000,
-    createdAt: Date.now() - 1000 * 60 * 60 * 3,
+    createdAt: BASE_TIMESTAMP - 1000 * 60 * 60 * 3,
     author: "Building A · 3INF",
     votes: 12,
   },
@@ -44,7 +49,7 @@ const DEMO_MEMES: MemeFeedItem[] = [
     id: "demo-2",
     type: "text",
     text: "“It's not a bug, it's an undocumented feature.” – every group project ever",
-    createdAt: Date.now() - 1000 * 60 * 90,
+    createdAt: BASE_TIMESTAMP - 1000 * 60 * 90,
     author: "Building C · AI squad",
     votes: 19,
   },
@@ -55,7 +60,7 @@ const DEMO_MEMES: MemeFeedItem[] = [
     fileName: "exam-pov.mp4",
     fileType: "video/mp4",
     fileSize: 2_100_000,
-    createdAt: Date.now() - 1000 * 60 * 45,
+    createdAt: BASE_TIMESTAMP - 1000 * 60 * 45,
     author: "Building B · Nerdcore",
     votes: 8,
   },
@@ -155,7 +160,7 @@ const MemeGame = () => {
     setType(isImage ? "image" : "video");
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
@@ -188,6 +193,22 @@ const MemeGame = () => {
       }
     }
 
+    // Convert file to data URL for local storage
+    let fileUrl: string | undefined;
+    if (file) {
+      try {
+        fileUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      } catch (err) {
+        setError("Failed to process file. Please try again.");
+        return;
+      }
+    }
+
     const now = Date.now();
     const submission: MemeSubmission = {
       type,
@@ -195,6 +216,7 @@ const MemeGame = () => {
       fileName: file?.name,
       fileType: file?.type,
       fileSize: file?.size,
+      fileUrl,
       createdAt: now,
     };
 
@@ -223,6 +245,7 @@ const MemeGame = () => {
 
     setText("");
     setFile(null);
+    setType(null);
   };
 
 
@@ -313,9 +336,10 @@ const MemeGame = () => {
         </Card>
       )}
 
-      {/* Form */}
-      <Card className="p-4 border-border bg-card/80 backdrop-blur-sm">
-        <form className="space-y-4" onSubmit={handleSubmit}>
+      {/* Form - only show if not submitted today */}
+      {!hasSubmittedToday && (
+        <Card className="p-4 border-border bg-card/80 backdrop-blur-sm">
+          <form className="space-y-4" onSubmit={handleSubmit}>
           {/* Type selector */}
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground uppercase tracking-[0.2em]">
@@ -435,7 +459,8 @@ const MemeGame = () => {
             </Button>
           </div>
         </form>
-      </Card>
+        </Card>
+      )}
 
       {/* Feed of memes from others (demo + local submissions) */}
       <div className="space-y-3">
@@ -468,25 +493,49 @@ const MemeGame = () => {
         </div>
 
         <div className="space-y-3">
-          {sortedFeed.map((item) => {
+          {isMounted && sortedFeed.map((item) => {
             const isVoted = !!votedIds[item.id];
             return (
               <Card
                 key={item.id}
                 className="p-3 border-border bg-card/80 flex items-start justify-between gap-3"
               >
-                <div className="space-y-1">
+                <div className="space-y-2 flex-1 min-w-0">
                   <p className="text-[11px] text-muted-foreground uppercase tracking-[0.2em]">
                     {item.type.toUpperCase()}_MEME
                   </p>
                   {item.type === "text" && item.text && (
                     <p className="text-sm text-foreground">{item.text}</p>
                   )}
-                  <p className="text-[11px] text-muted-foreground">
-                    {formatDate(item.createdAt)}
-                  </p>
+                  {item.type === "image" && item.fileUrl && (
+                    <div className="mt-2">
+                      <img
+                        src={item.fileUrl}
+                        alt={item.fileName || "Meme image"}
+                        className="max-w-full h-auto rounded-lg border border-border"
+                        style={{ maxHeight: "300px" }}
+                      />
+                    </div>
+                  )}
+                  {item.type === "video" && item.fileUrl && (
+                    <div className="mt-2">
+                      <video
+                        src={item.fileUrl}
+                        controls
+                        className="max-w-full h-auto rounded-lg border border-border"
+                        style={{ maxHeight: "300px" }}
+                      >
+                        Your browser does not support the video tag.
+                      </video>
+                    </div>
+                  )}
+                  {isMounted && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {formatDate(item.createdAt)}
+                    </p>
+                  )}
                 </div>
-                <div className="flex flex-col items-center gap-1">
+                <div className="flex flex-col items-center gap-1 flex-shrink-0">
                   <Button
                     type="button"
                     size="icon"
@@ -507,6 +556,9 @@ const MemeGame = () => {
               </Card>
             );
           })}
+          {!isMounted && (
+            <div className="text-sm text-muted-foreground">Loading feed...</div>
+          )}
         </div>
       </div>
     </div>

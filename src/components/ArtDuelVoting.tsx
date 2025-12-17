@@ -35,6 +35,7 @@ const ArtDuelVoting = () => {
   const [dailyWord, setDailyWord] = useState<string | null>(null);
   const [submissionEnded, setSubmissionEnded] = useState(false);
   const [deadlineHour, setDeadlineHour] = useState<number>(20);
+  const [votedDrawingId, setVotedDrawingId] = useState<string | null>(null);
 
   useEffect(() => {
     const loadDrawings = async () => {
@@ -44,27 +45,15 @@ const ArtDuelVoting = () => {
       }
 
       try {
-        // Get user's building from profile (more reliable than connectedUsers)
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('current_building_id')
-          .eq('user_id', user.id)
-          .single();
-
-        if (profileError || !profileData?.current_building_id) {
-          // Fallback to connectedUsers if profile doesn't have building
-          const myUser = connectedUsers.find(u => u.userId === user.id);
-          if (!myUser) {
-            setError('Please select a building first.');
-            setLoading(false);
-            return;
-          }
-          setMyBuildingId(myUser.buildingId);
-          console.log('Using building from connectedUsers:', myUser.buildingId);
-        } else {
-          setMyBuildingId(profileData.current_building_id);
-          console.log('Using building from profile:', profileData.current_building_id);
+        // Get user's building
+        const myUser = connectedUsers.find(u => u.userId === user.id);
+        if (!myUser) {
+          setError('Please select a building first.');
+          setLoading(false);
+          return;
         }
+
+        setMyBuildingId(myUser.buildingId);
 
         // Get today's word ID
         const today = new Date().toISOString().split('T')[0];
@@ -235,6 +224,16 @@ const ArtDuelVoting = () => {
           (profilesData || []).map((p: any) => [p.user_id, p.username])
         );
 
+        // First, find which drawing the user has voted on (if any)
+        const { data: userVoteData } = await supabase
+          .from('art_duel_votes')
+          .select('drawing_id')
+          .eq('voter_id', user.id)
+          .maybeSingle();
+        
+        const currentVotedDrawingId = userVoteData?.drawing_id || null;
+        setVotedDrawingId(currentVotedDrawingId);
+
         // Get vote counts and check if user has voted
         const drawingsWithVotes = await Promise.all(
           drawingsData.map(async (drawing: any) => {
@@ -244,18 +243,8 @@ const ArtDuelVoting = () => {
               .select('*', { count: 'exact', head: true })
               .eq('drawing_id', drawing.id);
 
-            // Check if current user has voted (use maybeSingle to handle no vote case)
-            const { data: userVote, error: voteError } = await supabase
-              .from('art_duel_votes')
-              .select('id')
-              .eq('drawing_id', drawing.id)
-              .eq('voter_id', user.id)
-              .maybeSingle();
-            
-            // Log errors but don't fail the whole process
-            if (voteError && voteError.code !== 'PGRST116') {
-              console.warn('Error checking vote status:', voteError);
-            }
+            // Check if current user has voted on this specific drawing
+            const hasVoted = currentVotedDrawingId === drawing.id;
 
             // Get building name
             const buildingName = drawing.building_id.replace('kortrijk-', '').replace('-', ' ').toUpperCase();
@@ -268,7 +257,7 @@ const ArtDuelVoting = () => {
               username: profilesMap.get(drawing.user_id) || 'Anonymous',
               building_name: buildingName,
               vote_count: count || 0,
-              has_voted: !!userVote,
+              has_voted: hasVoted,
             };
           })
         );
@@ -286,7 +275,7 @@ const ArtDuelVoting = () => {
   }, [user, sessionId, connectedUsers]);
 
   const handleVote = async (drawingId: string) => {
-    console.log('handleVote called:', { drawingId, user: !!user, myBuildingId, voting });
+    console.log('handleVote called:', { drawingId, user: !!user, myBuildingId, voting, votedDrawingId });
     
     if (!user) {
       console.error('Vote blocked: no user');
@@ -305,10 +294,7 @@ const ArtDuelVoting = () => {
       return;
     }
 
-    // Allow voting at any time (submission period only affects new submissions, not voting)
-    // Removed submission period check for voting
-
-    // Get drawing to check building
+    // Get drawing to check
     const drawing = drawings.find(d => d.id === drawingId);
     if (!drawing) {
       console.error('Drawing not found:', drawingId);
@@ -320,14 +306,20 @@ const ArtDuelVoting = () => {
       console.log('Cannot vote on your own drawing');
       return;
     }
-    
-    // Allow voting on drawings from any building (including your own building)
-    // as long as it's not your own drawing
 
-    // Check if user already voted on this drawing
-    if (drawing.has_voted) {
-      console.log('Already voted on this drawing');
+    // Check if user already voted on this drawing - if so, unvote instead
+    if (drawing.has_voted || votedDrawingId === drawingId) {
+      console.log('Already voted on this drawing, unvoting instead');
+      await handleUnvote(drawingId);
       return;
+    }
+
+    // Check if user has already voted on a different drawing
+    if (votedDrawingId && votedDrawingId !== drawingId) {
+      const confirmSwitch = confirm('You have already voted on another drawing. Do you want to change your vote?');
+      if (!confirmSwitch) {
+        return;
+      }
     }
 
     console.log('Setting voting state and inserting vote...');
@@ -336,7 +328,22 @@ const ArtDuelVoting = () => {
     try {
       console.log('Inserting vote:', { drawingId, voterId: user.id, voterBuildingId: myBuildingId });
 
-      // Insert vote
+      // Always delete any existing vote first to prevent duplicate key constraint violation
+      // This ensures we can change votes without constraint errors
+      const { error: deleteError } = await supabase
+        .from('art_duel_votes')
+        .delete()
+        .eq('voter_id', user.id);
+
+      if (deleteError) {
+        console.warn('Error deleting existing vote (may not exist):', deleteError);
+        // Continue anyway - the vote might not exist
+      }
+
+      // Get the previous drawing ID for state update
+      const previousVotedDrawingId = votedDrawingId;
+
+      // Insert new vote
       const { data: voteData, error: voteError } = await supabase
         .from('art_duel_votes')
         .insert({
@@ -348,19 +355,22 @@ const ArtDuelVoting = () => {
 
       if (voteError) {
         console.error('Vote error:', voteError);
+        // If it's a duplicate key error, the user might have clicked twice quickly
         if (voteError.code === '23505') {
-          // Already voted (unique constraint violation)
-          console.log('Already voted (unique constraint)');
-          setVoting(null);
-          // Update local state to reflect that user has voted
-          setDrawings(prev =>
-            prev.map(d =>
-              d.id === drawingId
-                ? { ...d, has_voted: true }
-                : d
-            )
-          );
-          return;
+          // Check if the vote actually exists
+          const { data: existingVote } = await supabase
+            .from('art_duel_votes')
+            .select('drawing_id')
+            .eq('voter_id', user.id)
+            .eq('drawing_id', drawingId)
+            .maybeSingle();
+          
+          if (existingVote) {
+            // Vote already exists, just update state
+            setVotedDrawingId(drawingId);
+            setVoting(null);
+            return;
+          }
         }
         alert(`Failed to vote: ${voteError.message || 'Unknown error'}`);
         setVoting(null);
@@ -371,16 +381,76 @@ const ArtDuelVoting = () => {
 
       // Update local state
       setDrawings(prev =>
+        prev.map(d => {
+          if (d.id === drawingId) {
+            return { ...d, vote_count: d.vote_count + 1, has_voted: true };
+          } else if (d.id === previousVotedDrawingId) {
+            // Remove vote from previous drawing
+            return { ...d, vote_count: Math.max(0, d.vote_count - 1), has_voted: false };
+          }
+          return d;
+        })
+      );
+
+      setVotedDrawingId(drawingId);
+      setVoting(null);
+    } catch (err: any) {
+      console.error('Error voting:', err);
+      setVoting(null);
+    }
+  };
+
+  const handleUnvote = async (drawingId: string, showAlert: boolean = true) => {
+    if (!user) {
+      return;
+    }
+
+    if (voting) {
+      console.log('Vote operation already in progress');
+      return;
+    }
+
+    if (votedDrawingId !== drawingId) {
+      console.log('Cannot unvote - this is not the drawing you voted on');
+      return;
+    }
+
+    setVoting(drawingId);
+
+    try {
+      // Delete the vote
+      const { error: deleteError } = await supabase
+        .from('art_duel_votes')
+        .delete()
+        .eq('voter_id', user.id)
+        .eq('drawing_id', drawingId);
+
+      if (deleteError) {
+        console.error('Unvote error:', deleteError);
+        if (showAlert) {
+          alert(`Failed to remove vote: ${deleteError.message || 'Unknown error'}`);
+        }
+        setVoting(null);
+        return;
+      }
+
+      // Update local state
+      setDrawings(prev =>
         prev.map(d =>
           d.id === drawingId
-            ? { ...d, vote_count: d.vote_count + 1, has_voted: true }
+            ? { ...d, vote_count: Math.max(0, d.vote_count - 1), has_voted: false }
             : d
         )
       );
 
+      setVotedDrawingId(null);
       setVoting(null);
+
+      if (showAlert) {
+        console.log('Vote removed successfully');
+      }
     } catch (err: any) {
-      console.error('Error voting:', err);
+      console.error('Error unvoting:', err);
       setVoting(null);
     }
   };
@@ -502,7 +572,7 @@ const ArtDuelVoting = () => {
                       <button
                         type="button"
                         className={`flex items-center gap-2 border-0 bg-transparent p-0 ${
-                          user && drawing.user_id !== user.id && !drawing.has_voted && !voting
+                          user && drawing.user_id !== user.id && !voting && (drawing.has_voted || (!votedDrawingId || votedDrawingId === drawing.id))
                             ? 'cursor-pointer hover:opacity-80 transition-opacity active:scale-95' 
                             : 'cursor-default opacity-50'
                         }`}
@@ -511,45 +581,28 @@ const ArtDuelVoting = () => {
                           e.stopPropagation();
                           if (!user) return;
                           
-                          console.log('=== HEART CLICKED ===');
-                          console.log('Drawing ID:', drawing.id);
-                          console.log('Drawing user:', drawing.user_id);
-                          console.log('My user ID:', user.id);
-                          console.log('Drawing building:', drawing.building_id);
-                          console.log('My building:', myBuildingId);
-                          console.log('Has voted:', drawing.has_voted);
-                          console.log('Voting state:', voting);
-                          console.log('Submission ended:', submissionEnded);
-                          
                           if (drawing.user_id === user.id) {
-                            console.log('❌ Cannot vote on your own drawing');
-                            alert('You cannot vote on your own drawing');
                             return;
                           }
                           
                           if (drawing.has_voted) {
-                            console.log('❌ Already voted');
-                            return;
+                            // Unvote
+                            handleUnvote(drawing.id);
+                          } else {
+                            // Vote
+                            handleVote(drawing.id);
                           }
-                          
-                          if (voting) {
-                            console.log('❌ Vote in progress');
-                            return;
-                          }
-                          
-                          console.log('✅ Calling handleVote');
-                          handleVote(drawing.id);
                         }}
-                        disabled={!user || drawing.user_id === user.id || drawing.has_voted || !!voting}
+                        disabled={!user || drawing.user_id === user.id || !!voting || !!(votedDrawingId && votedDrawingId !== drawing.id && !drawing.has_voted)}
                         title={!user
                           ? 'Please log in'
                           : drawing.user_id === user.id
                             ? 'Your Drawing' 
-                            : drawing.building_id === myBuildingId
-                              ? 'Your Building'
-                            : drawing.has_voted 
-                              ? 'You already voted' 
-                              : 'Click to vote'}
+                            : drawing.has_voted
+                              ? 'Click to remove vote'
+                              : votedDrawingId && votedDrawingId !== drawing.id
+                                ? 'You can only vote on one drawing. Unvote your current choice first.'
+                                : 'Click to vote'}
                         style={{ 
                           userSelect: 'none',
                           WebkitUserSelect: 'none',
@@ -562,37 +615,34 @@ const ArtDuelVoting = () => {
                         <span className="text-sm font-mono">{drawing.vote_count} votes</span>
                       </button>
 
-                      {/* Vote button - show for other users' drawings (from any building) */}
+                      {/* Vote/Unvote button - only show for other users' drawings */}
                       {user && drawing.user_id !== user.id && (
                         <Button
                           size="sm"
-                          variant={drawing.has_voted ? 'outline' : 'default'}
+                          variant={drawing.has_voted ? 'destructive' : 'default'}
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            console.log('Vote button clicked');
-                            handleVote(drawing.id);
+                            if (drawing.has_voted) {
+                              handleUnvote(drawing.id);
+                            } else {
+                              handleVote(drawing.id);
+                            }
                           }}
-                          disabled={drawing.has_voted || voting === drawing.id}
+                          disabled={voting === drawing.id || !!(votedDrawingId && votedDrawingId !== drawing.id && !drawing.has_voted)}
                           className="text-xs"
                         >
-                          {drawing.has_voted ? 'Voted' : voting === drawing.id ? 'Voting...' : 'Vote'}
+                          {drawing.has_voted 
+                            ? (voting === drawing.id ? 'Removing...' : 'Remove Vote')
+                            : voting === drawing.id 
+                              ? 'Voting...' 
+                              : votedDrawingId && votedDrawingId !== drawing.id
+                                ? 'Change Vote'
+                                : 'Vote'}
                         </Button>
                       )}
                       {user && drawing.user_id === user.id && (
                         <span className="text-xs text-muted-foreground font-mono">Your Drawing</span>
-                      )}
-                      {user && drawing.user_id !== user.id && drawing.building_id === myBuildingId && (
-                        <span className="text-xs text-muted-foreground font-mono">Your Building</span>
-                      )}
-                      {/* Debug info - remove in production */}
-                      {process.env.NODE_ENV === 'development' && user && (
-                        <div className="text-[8px] text-muted-foreground/50 mt-1">
-                          Debug: drawing.user_id={drawing.user_id?.substring(0, 8)}, 
-                          user.id={user.id?.substring(0, 8)}, 
-                          drawing.building={drawing.building_id}, 
-                          myBuilding={myBuildingId}
-                        </div>
                       )}
                     </div>
                   </div>
@@ -603,7 +653,7 @@ const ArtDuelVoting = () => {
 
           {/* Info */}
           <div className="text-center text-sm text-muted-foreground">
-            <p>You can vote on drawings from any building (except your own). Voting ends at the end of the day.</p>
+            <p>You can vote on one drawing (except your own). You can change or remove your vote anytime. Voting ends at the end of the day.</p>
           </div>
         </div>
       </div>
