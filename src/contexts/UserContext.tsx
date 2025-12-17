@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { supabase } from '@/lib/supabase';
 
 interface ConnectedUser {
   userId: string;
@@ -30,6 +31,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const currentBuildingRef = useRef<string | null>(null);
+  const supabaseChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   // Generate or retrieve user ID
   useEffect(() => {
@@ -41,7 +43,77 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setCurrentUserId(userId);
   }, []);
 
-  // Initialize Socket.io connection
+  // Initialize Supabase Realtime for online users
+  useEffect(() => {
+    if (typeof window === 'undefined' || !currentUserId) return;
+
+    // Load initial users from Supabase
+    const loadInitialUsers = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('online_users')
+          .select('*')
+          .gte('last_seen', new Date(Date.now() - USER_TIMEOUT).toISOString());
+
+        if (error) {
+          console.error('Error loading users from Supabase:', error);
+          return;
+        }
+
+        const users: ConnectedUser[] = (data || []).map((user) => ({
+          userId: user.user_id,
+          buildingId: user.building_id,
+          timestamp: new Date(user.last_seen).getTime(),
+          locationVerified: user.location_verified,
+        }));
+
+        setConnectedUsers(users);
+      } catch (error) {
+        console.error('Error loading initial users:', error);
+      }
+    };
+
+    loadInitialUsers();
+
+    // Setup Supabase Realtime channel
+    const channel = supabase
+      .channel('online_users_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'online_users',
+        },
+        async (payload) => {
+          // Reload users when changes occur
+          const { data, error } = await supabase
+            .from('online_users')
+            .select('*')
+            .gte('last_seen', new Date(Date.now() - USER_TIMEOUT).toISOString());
+
+          if (!error && data) {
+            const users: ConnectedUser[] = data.map((user) => ({
+              userId: user.user_id,
+              buildingId: user.building_id,
+              timestamp: new Date(user.last_seen).getTime(),
+              locationVerified: user.location_verified,
+            }));
+            setConnectedUsers(users);
+          }
+        }
+      )
+      .subscribe();
+
+    supabaseChannelRef.current = channel;
+
+    return () => {
+      supabase.removeChannel(channel);
+      supabaseChannelRef.current = null;
+    };
+  }, [currentUserId]);
+
+  // Initialize Socket.io connection (keep for backward compatibility)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -114,22 +186,62 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Heartbeat: update timestamp van huidige gebruiker via Socket.io
+  // Heartbeat: update timestamp van huidige gebruiker via Supabase en Socket.io
   useEffect(() => {
-    if (!currentUserId || !socketRef.current) return;
+    if (!currentUserId || !currentBuildingRef.current) return;
 
-    const heartbeat = setInterval(() => {
-      if (socketRef.current?.connected && currentBuildingRef.current) {
+    const heartbeat = async () => {
+      // Update via Supabase
+      try {
+        const { error } = await supabase
+          .from('online_users')
+          .upsert(
+            {
+              user_id: currentUserId,
+              building_id: currentBuildingRef.current,
+              location_verified: true,
+              last_seen: new Date().toISOString(),
+            },
+            {
+              onConflict: 'user_id',
+            }
+          );
+
+        if (error) {
+          console.error('Error updating heartbeat in Supabase:', error);
+        }
+      } catch (error) {
+        console.error('Error in heartbeat:', error);
+      }
+
+      // Also update via Socket.io (backward compatibility)
+      if (socketRef.current?.connected) {
         socketRef.current.emit('heartbeat', { userId: currentUserId });
       }
-    }, HEARTBEAT_INTERVAL);
+    };
 
-    return () => clearInterval(heartbeat);
+    // Initial heartbeat
+    heartbeat();
+
+    const interval = setInterval(heartbeat, HEARTBEAT_INTERVAL);
+
+    return () => clearInterval(interval);
   }, [currentUserId]);
 
-  // Cleanup oude gebruikers periodiek (backup, server does this too)
+  // Cleanup oude gebruikers periodiek (lokaal en Supabase)
   useEffect(() => {
-    const cleanup = setInterval(() => {
+    const cleanup = async () => {
+      // Cleanup in Supabase (database function handles this, but we can also do it client-side)
+      try {
+        const { error } = await supabase.rpc('cleanup_old_users');
+        if (error) {
+          console.error('Error cleaning up old users:', error);
+        }
+      } catch (error) {
+        console.error('Error calling cleanup function:', error);
+      }
+
+      // Also cleanup locally
       setConnectedUsers((prev) => {
         const now = Date.now();
         const active = prev.filter(
@@ -138,9 +250,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(active));
         return active;
       });
-    }, HEARTBEAT_INTERVAL);
+    };
 
-    return () => clearInterval(cleanup);
+    // Run cleanup immediately and then periodically
+    cleanup();
+    const interval = setInterval(cleanup, HEARTBEAT_INTERVAL);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Luister naar storage events voor cross-tab synchronisatie
@@ -164,10 +280,26 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  const removeUser = (userId: string) => {
+  const removeUser = async (userId: string) => {
+    // Remove from Supabase
+    try {
+      const { error } = await supabase
+        .from('online_users')
+        .delete()
+        .eq('user_id', userId);
+
+      if (error) {
+        console.error('Error removing user from Supabase:', error);
+      }
+    } catch (error) {
+      console.error('Error removing user:', error);
+    }
+
+    // Also remove via Socket.io (backward compatibility)
     if (socketRef.current?.connected) {
       socketRef.current.emit('user_leave', { userId });
     }
+
     setConnectedUsers((prev) => {
       const updated = prev.filter((user) => user.userId !== userId);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
@@ -176,16 +308,46 @@ export function UserProvider({ children }: { children: ReactNode }) {
     currentBuildingRef.current = null;
   };
 
-  // Cleanup bij unmount
+  // Cleanup bij unmount en wanneer tab sluit
   useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Remove user when tab closes
+      if (currentUserId) {
+        // Use navigator.sendBeacon for reliable cleanup on tab close
+        const removeUserData = async () => {
+          try {
+            await supabase
+              .from('online_users')
+              .delete()
+              .eq('user_id', currentUserId);
+          } catch (error) {
+            console.error('Error removing user on tab close:', error);
+          }
+        };
+        
+        // Try to remove synchronously if possible
+        removeUserData();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('visibilitychange', () => {
+      // Also cleanup when page becomes hidden (tab switch, minimize, etc.)
+      if (document.hidden && currentUserId) {
+        // Don't remove immediately, but mark as potentially inactive
+        // The heartbeat will stop, and cleanup will happen after timeout
+      }
+    });
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       if (currentUserId) {
         removeUser(currentUserId);
       }
     };
   }, [currentUserId]);
 
-  const addUser = (buildingId: string, locationVerified: boolean) => {
+  const addUser = async (buildingId: string, locationVerified: boolean) => {
     if (!currentUserId) return;
 
     // Only add if location is verified
@@ -196,7 +358,30 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     currentBuildingRef.current = buildingId;
 
-    // Send to server via Socket.io
+    // Add/update user in Supabase
+    try {
+      const { error } = await supabase
+        .from('online_users')
+        .upsert(
+          {
+            user_id: currentUserId,
+            building_id: buildingId,
+            location_verified: true,
+            last_seen: new Date().toISOString(),
+          },
+          {
+            onConflict: 'user_id',
+          }
+        );
+
+      if (error) {
+        console.error('Error adding user to Supabase:', error);
+      }
+    } catch (error) {
+      console.error('Error adding user:', error);
+    }
+
+    // Also send via Socket.io (backward compatibility)
     if (socketRef.current?.connected) {
       socketRef.current.emit('user_join', {
         userId: currentUserId,
