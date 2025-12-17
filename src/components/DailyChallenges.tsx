@@ -7,6 +7,7 @@ import {
   Clock,
   Users,
   ChevronRight,
+  QrCode,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { useRouter } from "next/navigation";
@@ -70,6 +71,17 @@ const DailyChallenges = () => {
       points: 100,
       type: "upcoming",
       color: "yellow",
+    },
+    {
+      id: "5",
+      title: "QR CODE HUNT",
+      description: "Find someone on campus with a matching QR code. Scan and match to earn points!",
+      icon: <QrCode className="w-6 h-6" />,
+      participants: 32,
+      timeLeft: "3h 15m",
+      points: 125,
+      type: "active",
+      color: "green",
     },
   ];
 
@@ -144,6 +156,10 @@ const DailyChallenges = () => {
                   router.push("/games/speed-quiz");
                   return;
                 }
+                if (challenge.id === "5") {
+                  router.push("/games/qr-hunt");
+                  return;
+                }
               }}
             >
               {isActive && (
@@ -197,6 +213,10 @@ const DailyChallenges = () => {
                     }
                     if (challenge.id === "2") {
                       router.push("/games/meme-battle");
+                      return;
+                    }
+                    if (challenge.id === "5") {
+                      router.push("/games/qr-hunt");
                       return;
                     }
                   }}

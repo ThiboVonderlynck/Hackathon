@@ -9,7 +9,6 @@ import { useUsers } from '@/contexts/UserContext';
 import { ArrowLeft, Loader2, Trophy, Heart } from 'lucide-react';
 import { motion } from 'framer-motion';
 import MatrixRain from '@/components/MatrixRain';
-import { checkCrownBadge } from '@/utils/badgeHelpers';
 
 interface Drawing {
   id: string;
@@ -34,10 +33,15 @@ const ArtDuelVoting = () => {
   const [voting, setVoting] = useState<string | null>(null);
   const [myBuildingId, setMyBuildingId] = useState<string | null>(null);
   const [dailyWord, setDailyWord] = useState<string | null>(null);
+  const [submissionEnded, setSubmissionEnded] = useState(false);
+  const [deadlineHour, setDeadlineHour] = useState<number>(20);
 
   useEffect(() => {
     const loadDrawings = async () => {
-      if (!user || !sessionId) return;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
 
       try {
         // Get user's building
@@ -54,7 +58,7 @@ const ArtDuelVoting = () => {
         const today = new Date().toISOString().split('T')[0];
         const { data: wordData } = await supabase
           .from('daily_words')
-          .select('id, word')
+          .select('id, word, date, submission_deadline_hour')
           .eq('date', today)
           .single();
 
@@ -62,40 +66,184 @@ const ArtDuelVoting = () => {
           setDailyWord(wordData.word);
         }
 
-        // Get all drawings for today (excluding own building)
-        const { data: drawingsData, error: drawingsError } = await supabase
+        // Check if submission period has ended using configurable deadline hour (default 20:00 / 8 PM)
+        let submissionPeriodEnded = false;
+        if (wordData) {
+          const hour = wordData.submission_deadline_hour ?? 20; // Default to 8 PM
+          setDeadlineHour(hour);
+          const wordDate = new Date(wordData.date);
+          const submissionDeadline = new Date(wordDate);
+          submissionDeadline.setHours(hour, 0, 0, 0); // Set to configured hour (e.g., 20:00)
+          submissionPeriodEnded = new Date() >= submissionDeadline;
+        }
+        setSubmissionEnded(submissionPeriodEnded);
+
+        // Build query - if sessionId provided, filter by session, otherwise get all for today
+        // Show ALL drawings (including own building) but only allow voting on other buildings
+        let query = supabase
           .from('art_duel_drawings')
           .select(`
             id,
             canvas_data,
             user_id,
             building_id,
-            profiles:user_id (username)
+            is_completed
           `)
-          .neq('building_id', myUser.buildingId); // Exclude own building
+          // Don't exclude own building - show all drawings
+
+        // If sessionId is provided, filter by that session
+        if (sessionId) {
+          query = query.eq('session_id', sessionId);
+        } else {
+          // Otherwise, get all drawings for today's word
+          if (wordData) {
+            // Get all sessions for today's word
+            const { data: sessionsData } = await supabase
+              .from('art_duel_sessions')
+              .select('id')
+              .eq('daily_word_id', wordData.id);
+
+            if (sessionsData && sessionsData.length > 0) {
+              const sessionIds = sessionsData.map(s => s.id);
+              // Use .in() for multiple, .eq() for single
+              if (sessionIds.length === 1) {
+                query = query.eq('session_id', sessionIds[0]);
+              } else {
+                query = query.in('session_id', sessionIds);
+              }
+            } else {
+              // No sessions yet, show empty state
+              setDrawings([]);
+              setLoading(false);
+              return;
+            }
+          } else {
+            // No word for today, show empty state
+            setDrawings([]);
+            setLoading(false);
+            return;
+          }
+        }
+
+        const { data: drawingsData, error: drawingsError } = await query;
 
         if (drawingsError) {
-          setError('Failed to load drawings.');
-          setLoading(false);
-          return;
+          console.error('Error loading drawings:', drawingsError);
+          // Check if it's a query syntax error (400) - might be due to .in() with single value or missing column
+          const isQueryError = drawingsError.code === '22P02' || 
+                              drawingsError.code === '42703' || 
+                              drawingsError.code === 'PGRST202' || 
+                              drawingsError.message?.includes('is_completed') ||
+                              drawingsError.message?.includes('syntax') ||
+                              (drawingsError as any).status === 400;
+          
+          if (isQueryError) {
+            // Retry without is_completed filter (column doesn't exist yet)
+            let retryQuery = supabase
+              .from('art_duel_drawings')
+              .select(`
+                id,
+                canvas_data,
+                user_id,
+                building_id,
+                is_completed
+              `)
+              // Show all drawings including own building
+
+            if (sessionId) {
+              retryQuery = retryQuery.eq('session_id', sessionId);
+            } else if (wordData) {
+              const { data: sessionsData } = await supabase
+                .from('art_duel_sessions')
+                .select('id')
+                .eq('daily_word_id', wordData.id);
+
+              if (sessionsData && sessionsData.length > 0) {
+                const sessionIds = sessionsData.map(s => s.id);
+                if (sessionIds.length === 1) {
+                  retryQuery = retryQuery.eq('session_id', sessionIds[0]);
+                } else {
+                  retryQuery = retryQuery.in('session_id', sessionIds);
+                }
+              }
+            }
+
+            const { data: retryData, error: retryError } = await retryQuery;
+            if (retryError) {
+              setError('Failed to load drawings. Please run the database migration to add the is_completed column.');
+              setLoading(false);
+              return;
+            }
+            // Show all drawings if column doesn't exist (backward compatibility)
+            processDrawings(retryData || []);
+            return;
+          } else {
+            setError('Failed to load drawings.');
+            setLoading(false);
+            return;
+          }
         }
+
+        // Filter by is_completed - only show completed drawings
+        // (Column might not exist in database yet)
+        let filteredDrawings = drawingsData || [];
+        if (drawingsData) {
+          // Always show only completed drawings (both before and after deadline)
+          filteredDrawings = drawingsData.filter((d: any) => {
+            // If is_completed exists, use it; otherwise show all (backward compatibility)
+            return d.is_completed === true;
+          });
+        }
+
+        processDrawings(filteredDrawings);
+      } catch (err: any) {
+        setError(err.message || 'Failed to load drawings.');
+        setLoading(false);
+      }
+    };
+
+    const processDrawings = async (drawingsData: any[]) => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        // Get unique user IDs from drawings
+        const userIds = [...new Set(drawingsData.map((d: any) => d.user_id))];
+        
+        // Fetch all profiles at once
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('user_id, username')
+          .in('user_id', userIds);
+
+        // Create a map for quick lookup
+        const profilesMap = new Map(
+          (profilesData || []).map((p: any) => [p.user_id, p.username])
+        );
 
         // Get vote counts and check if user has voted
         const drawingsWithVotes = await Promise.all(
-          (drawingsData || []).map(async (drawing: any) => {
+          drawingsData.map(async (drawing: any) => {
             // Get vote count
-            const { count } = await supabase
+            const { count, error: countError } = await supabase
               .from('art_duel_votes')
               .select('*', { count: 'exact', head: true })
               .eq('drawing_id', drawing.id);
 
-            // Check if current user has voted
-            const { data: userVote } = await supabase
+            // Check if current user has voted (use maybeSingle to handle no vote case)
+            const { data: userVote, error: voteError } = await supabase
               .from('art_duel_votes')
               .select('id')
               .eq('drawing_id', drawing.id)
               .eq('voter_id', user.id)
-              .single();
+              .maybeSingle();
+            
+            // Log errors but don't fail the whole process
+            if (voteError && voteError.code !== 'PGRST116') {
+              console.warn('Error checking vote status:', voteError);
+            }
 
             // Get building name
             const buildingName = drawing.building_id.replace('kortrijk-', '').replace('-', ' ').toUpperCase();
@@ -105,7 +253,7 @@ const ArtDuelVoting = () => {
               canvas_data: drawing.canvas_data,
               user_id: drawing.user_id,
               building_id: drawing.building_id,
-              username: drawing.profiles?.username || 'Anonymous',
+              username: profilesMap.get(drawing.user_id) || 'Anonymous',
               building_name: buildingName,
               vote_count: count || 0,
               has_voted: !!userVote,
@@ -116,6 +264,7 @@ const ArtDuelVoting = () => {
         setDrawings(drawingsWithVotes);
         setLoading(false);
       } catch (err: any) {
+        console.error('Error processing drawings:', err);
         setError(err.message || 'Failed to load drawings.');
         setLoading(false);
       }
@@ -125,7 +274,16 @@ const ArtDuelVoting = () => {
   }, [user, sessionId, connectedUsers]);
 
   const handleVote = async (drawingId: string) => {
-    if (!user || !myBuildingId || voting) return;
+    if (!user || !myBuildingId || voting) {
+      console.log('Vote blocked:', { user: !!user, myBuildingId, voting, submissionEnded });
+      return;
+    }
+    
+    // Allow voting even before deadline if user wants to vote early
+    // if (!submissionEnded) {
+    //   console.log('Voting not yet enabled - deadline has not passed');
+    //   return;
+    // }
 
     setVoting(drawingId);
 
@@ -136,27 +294,45 @@ const ArtDuelVoting = () => {
 
       // Check if user already voted on this drawing
       if (drawing.has_voted) {
+        console.log('Already voted on this drawing');
         setVoting(null);
         return;
       }
 
+      console.log('Inserting vote:', { drawingId, voterId: user.id, voterBuildingId: myBuildingId });
+
       // Insert vote
-      const { error: voteError } = await supabase
+      const { data: voteData, error: voteError } = await supabase
         .from('art_duel_votes')
         .insert({
           drawing_id: drawingId,
           voter_id: user.id,
           voter_building_id: myBuildingId,
-        });
+        })
+        .select();
 
       if (voteError) {
+        console.error('Vote error:', voteError);
         if (voteError.code === '23505') {
-          // Already voted
+          // Already voted (unique constraint violation)
+          console.log('Already voted (unique constraint)');
           setVoting(null);
+          // Update local state to reflect that user has voted
+          setDrawings(prev =>
+            prev.map(d =>
+              d.id === drawingId
+                ? { ...d, has_voted: true }
+                : d
+            )
+          );
           return;
         }
-        throw voteError;
+        alert(`Failed to vote: ${voteError.message || 'Unknown error'}`);
+        setVoting(null);
+        return;
       }
+
+      console.log('Vote inserted successfully:', voteData);
 
       // Update local state
       setDrawings(prev =>
@@ -227,13 +403,23 @@ const ArtDuelVoting = () => {
 
           {/* Daily word */}
           {dailyWord && (
-            <div className="text-center">
+            <div className="text-center space-y-3">
               <div className="inline-block px-6 py-3 bg-card border border-primary/30 rounded-lg">
                 <p className="text-muted-foreground text-sm mb-1">WORD OF THE DAY:</p>
                 <p className="text-foreground text-xl font-display font-bold">
                   "{dailyWord.toUpperCase()}"
                 </p>
               </div>
+              {!submissionEnded && (
+                <div className="inline-block px-4 py-2 bg-primary/10 border border-primary/30 rounded-lg">
+                  <p className="text-primary text-sm font-mono">
+                    ⏳ Submission period active - Voting will begin after {deadlineHour}:00
+                  </p>
+                  <p className="text-muted-foreground text-xs font-mono mt-1">
+                    You can view drawings but voting is disabled until the deadline
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -278,21 +464,42 @@ const ArtDuelVoting = () => {
 
                     {/* Vote count */}
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div 
+                        className={`flex items-center gap-2 ${
+                          drawing.building_id !== myBuildingId && !drawing.has_voted && !voting
+                            ? 'cursor-pointer hover:opacity-80 transition-opacity' 
+                            : 'cursor-default'
+                        }`}
+                        onClick={() => {
+                          if (drawing.building_id !== myBuildingId && !drawing.has_voted && !voting) {
+                            handleVote(drawing.id);
+                          }
+                        }}
+                        title={drawing.building_id === myBuildingId 
+                          ? 'Your Building' 
+                          : drawing.has_voted 
+                            ? 'You already voted' 
+                            : 'Click to vote'}
+                      >
                         <Heart className={`w-4 h-4 ${drawing.has_voted ? 'text-destructive fill-destructive' : 'text-muted-foreground'}`} />
                         <span className="text-sm font-mono">{drawing.vote_count} votes</span>
                       </div>
 
-                      {/* Vote button */}
-                      <Button
-                        size="sm"
-                        variant={drawing.has_voted ? 'outline' : 'default'}
-                        onClick={() => handleVote(drawing.id)}
-                        disabled={drawing.has_voted || voting === drawing.id}
-                        className="text-xs"
-                      >
-                        {drawing.has_voted ? 'Voted' : voting === drawing.id ? 'Voting...' : 'Vote'}
-                      </Button>
+                      {/* Vote button - only show for other buildings */}
+                      {drawing.building_id !== myBuildingId && (
+                        <Button
+                          size="sm"
+                          variant={drawing.has_voted ? 'outline' : 'default'}
+                          onClick={() => handleVote(drawing.id)}
+                          disabled={drawing.has_voted || voting === drawing.id}
+                          className="text-xs"
+                        >
+                          {drawing.has_voted ? 'Voted' : voting === drawing.id ? 'Voting...' : 'Vote'}
+                        </Button>
+                      )}
+                      {drawing.building_id === myBuildingId && (
+                        <span className="text-xs text-muted-foreground font-mono">Your Building</span>
+                      )}
                     </div>
                   </div>
                 </motion.div>

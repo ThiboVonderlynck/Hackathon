@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUsers } from '@/contexts/UserContext';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle } from 'lucide-react';
 import MatrixRain from '@/components/MatrixRain';
 import { trackGamePlay, trackChallenge } from '@/utils/badgeHelpers';
 
@@ -31,7 +31,12 @@ const ArtDuel = () => {
   const { user, profile } = useAuth();
   const { connectedUsers } = useUsers();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [timeLeft, setTimeLeft] = useState(90);
+  const [submissionDeadline, setSubmissionDeadline] = useState<Date | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasExistingDraft, setHasExistingDraft] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [submissionEnded, setSubmissionEnded] = useState(false);
   const [partnerCursor, setPartnerCursor] = useState<DrawingData | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
@@ -56,11 +61,11 @@ const ArtDuel = () => {
 
       try {
         // Get today's word
-        const today = new Date().toISOString().split('T')[0];
+        const todayStr = new Date().toISOString().split('T')[0];
         const { data: wordData, error: wordError } = await supabase
           .from('daily_words')
-          .select('id, word')
-          .eq('date', today)
+          .select('id, word, date, submission_deadline_hour')
+          .eq('date', todayStr)
           .single();
 
         if (wordError || !wordData) {
@@ -70,6 +75,18 @@ const ArtDuel = () => {
         }
 
         setDailyWord(wordData.word);
+
+        // Calculate submission deadline using configurable hour (default 20:00 / 8 PM)
+        const deadlineHour = wordData.submission_deadline_hour ?? 20; // Default to 8 PM
+        const wordDate = new Date(wordData.date);
+        const deadline = new Date(wordDate);
+        deadline.setHours(deadlineHour, 0, 0, 0); // Set to configured hour (e.g., 20:00)
+        setSubmissionDeadline(deadline);
+
+        // Check if submission period has ended (but don't redirect - allow viewing)
+        if (new Date() >= deadline) {
+          setSubmissionEnded(true);
+        }
 
         // Get user's building from connected users
         const myUser = connectedUsers.find(u => u.userId === user.id);
@@ -147,6 +164,58 @@ const ArtDuel = () => {
 
         setSessionId(currentSessionId);
 
+        // Load existing draft if any
+        const { data: existingDrawing, error: drawingError } = await supabase
+          .from('art_duel_drawings')
+          .select('canvas_data, is_completed')
+          .eq('session_id', currentSessionId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        
+        // Log error if it's not a "no rows" error
+        if (drawingError && drawingError.code !== 'PGRST116') {
+          console.warn('Error loading existing drawing:', drawingError);
+        }
+
+        if (existingDrawing) {
+          if (existingDrawing.is_completed) {
+            setIsCompleted(true);
+            // Load completed drawing onto canvas
+            if (existingDrawing.canvas_data && canvasRef.current) {
+              const img = new Image();
+              img.onload = () => {
+                const ctx = canvasRef.current?.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                }
+              };
+              img.src = existingDrawing.canvas_data;
+            }
+            // Redirect to voting page to see all drawings
+            router.push('/games/art-duel/vote');
+            return;
+          } else {
+            // Load draft
+            setHasExistingDraft(true);
+            if (existingDrawing.canvas_data && canvasRef.current) {
+              const img = new Image();
+              img.onload = () => {
+                const ctx = canvasRef.current?.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                }
+              };
+              img.src = existingDrawing.canvas_data;
+            }
+          }
+        }
+        
+        // Only redirect if deadline has passed AND drawing is completed
+        if (new Date() >= deadline && existingDrawing?.is_completed) {
+          router.push('/games/art-duel/vote');
+          return;
+        }
+
         // Setup realtime channel
         const channel = supabase.channel(`canvas:${currentSessionId}`, {
           config: {
@@ -221,45 +290,77 @@ const ArtDuel = () => {
     };
   }, [user, connectedUsers]);
 
-  // Timer countdown
+  // Update time remaining for submission
   useEffect(() => {
-    if (loading || !sessionId) return;
+    if (!submissionDeadline || loading) return;
 
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          handleComplete();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    const updateTime = () => {
+      const now = new Date();
+      const remaining = submissionDeadline.getTime() - now.getTime();
 
-    return () => clearInterval(timer);
-  }, [loading, sessionId]);
+      if (remaining <= 0) {
+        setSubmissionEnded(true);
+        setTimeRemaining('SUBMISSION ENDED');
+        // Don't auto-redirect - let user see their drawing and navigate manually
+        return;
+      }
 
-  const handleComplete = async () => {
-    if (drawingCompleteRef.current || !canvasRef.current || !sessionId || !user || !myBuildingId) return;
-    drawingCompleteRef.current = true;
+      const hours = Math.floor(remaining / (1000 * 60 * 60));
+      const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
 
+      if (hours > 0) {
+        setTimeRemaining(`${hours}h ${minutes}m ${seconds}s`);
+      } else if (minutes > 0) {
+        setTimeRemaining(`${minutes}m ${seconds}s`);
+      } else {
+        setTimeRemaining(`${seconds}s`);
+      }
+    };
+
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+
+    return () => clearInterval(interval);
+  }, [submissionDeadline, loading, router]);
+
+  const handleFinishDrawing = async () => {
+    if (!canvasRef.current || !sessionId || !user || !myBuildingId || isSubmitting || submissionEnded) {
+      console.log('Submission blocked:', { canvasRef: !!canvasRef.current, sessionId, user: !!user, myBuildingId, isSubmitting, submissionEnded });
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
-      // Save drawing to database
       const canvasData = canvasRef.current.toDataURL('image/png');
+      
+      if (!canvasData || canvasData === 'data:,') {
+        alert('Canvas is empty. Please draw something first.');
+        setIsSubmitting(false);
+        return;
+      }
 
-      const { error: saveError } = await supabase
+      console.log('Submitting drawing:', { sessionId, userId: user.id, buildingId: myBuildingId, canvasDataLength: canvasData.length });
+
+      const { data, error: saveError } = await supabase
         .from('art_duel_drawings')
         .upsert({
           session_id: sessionId,
           user_id: user.id,
           building_id: myBuildingId,
           canvas_data: canvasData,
+          is_completed: true,
+          submitted_at: new Date().toISOString(),
         }, {
           onConflict: 'session_id,user_id',
-        });
+        })
+        .select();
 
       if (saveError) {
-        console.error('Error saving drawing:', saveError);
+        console.error('Error submitting drawing:', saveError);
+        alert(`Failed to submit drawing: ${saveError.message || 'Unknown error'}. Please try again.`);
+        setIsSubmitting(false);
+        return;
       }
 
       // Mark session as completed
@@ -276,7 +377,9 @@ const ArtDuel = () => {
       // Navigate to voting page (session param is optional, shows all today's drawings)
       router.push('/games/art-duel/vote');
     } catch (err) {
-      console.error('Error completing drawing:', err);
+      console.error('Error submitting drawing:', err);
+      alert(`Failed to submit drawing: ${err instanceof Error ? err.message : 'Unknown error'}. Please try again.`);
+      setIsSubmitting(false);
     }
   };
 
@@ -316,6 +419,9 @@ const ArtDuel = () => {
   );
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    // Don't allow drawing if already completed or submission ended
+    if (isCompleted || submissionEnded) return;
+    
     setIsDrawing(true);
     const rect = canvasRef.current?.getBoundingClientRect();
     if (rect) {
@@ -338,6 +444,12 @@ const ArtDuel = () => {
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
+    // Don't allow drawing if already completed or submission ended
+    if (isCompleted || submissionEnded) {
+      setMousePos(null);
+      return;
+    }
+    
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -402,18 +514,7 @@ const ArtDuel = () => {
     setMousePos(null);
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const timerColor =
-    timeLeft <= 10
-      ? 'text-destructive'
-      : timeLeft <= 30
-      ? 'text-yellow-500'
-      : 'text-primary';
+  // No longer needed - removed timer
 
   if (loading) {
     return (
@@ -461,8 +562,11 @@ const ArtDuel = () => {
                 DAILY_CHALLENGE / DRAWING
               </p>
             </div>
-            <div className={`font-mono text-3xl font-bold ${timerColor} ${timeLeft <= 10 ? 'glitch' : ''}`}>
-              {formatTime(timeLeft)}
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground font-mono mb-1">TIME REMAINING</p>
+              <div className={`font-mono text-xl font-bold ${submissionEnded ? 'text-destructive' : 'text-primary'}`}>
+                {timeRemaining || '--:--:--'}
+              </div>
             </div>
           </div>
 
@@ -569,13 +673,34 @@ const ArtDuel = () => {
               </div>
             ))}
 
+            {/* Draft indicator */}
+            {hasExistingDraft && !isCompleted && (
+              <div className="mb-2 text-center">
+                <p className="text-xs text-muted-foreground font-mono">
+                  📝 Draft loaded - You can continue editing
+                </p>
+              </div>
+            )}
+            {/* Completed indicator */}
+            {isCompleted && !submissionEnded && (
+              <div className="mb-2 text-center">
+                <p className="text-xs text-primary font-mono">
+                  ✓ Drawing submitted - You can still edit until the deadline
+                </p>
+              </div>
+            )}
+
             {/* Canvas */}
             <canvas
               ref={canvasRef}
               width={800}
               height={500}
               className={`w-full bg-card border border-primary/30 rounded-lg touch-none ${
-                isDrawing ? 'cursor-none' : 'cursor-crosshair'
+                isCompleted || submissionEnded 
+                  ? 'cursor-not-allowed opacity-75' 
+                  : isDrawing 
+                    ? 'cursor-none' 
+                    : 'cursor-crosshair'
               }`}
               style={{
                 boxShadow: `0 0 ${20 + chaosLevel * 0.3}px hsl(var(--primary) / ${
@@ -611,6 +736,43 @@ const ArtDuel = () => {
               <span className="text-muted-foreground">their strokes</span>
             </div>
           </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center justify-center gap-4 pt-4">
+            <Button
+              onClick={handleFinishDrawing}
+              disabled={isSubmitting || submissionEnded}
+              variant="neon"
+              className="font-mono"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  SUBMITTING...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  FINISH DRAWING
+                </>
+              )}
+            </Button>
+          </div>
+
+          {submissionEnded && (
+            <div className="text-center">
+              <p className="text-destructive font-mono text-sm">
+                ⚠️ Submission period has ended. You can view your drawing but cannot submit or edit.
+              </p>
+              <Button
+                onClick={() => router.push('/games/art-duel/vote')}
+                variant="outline"
+                className="mt-2 font-mono"
+              >
+                Go to Voting
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
