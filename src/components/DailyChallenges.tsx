@@ -132,6 +132,10 @@ const DailyChallenges = () => {
                   router.push("/games/word-chain");
                   return;
                 }
+                if (challenge.id === "2") {
+                  router.push("/games/meme-battle");
+                  return;
+                }
               }}
             >
               {isActive && (
@@ -181,6 +185,11 @@ const DailyChallenges = () => {
                     e.stopPropagation();
                     if (challenge.id === "1") {
                       router.push("/games/word-chain");
+                      return;
+                    }
+                    if (challenge.id === "2") {
+                      router.push("/games/meme-battle");
+                      return;
                     }
                   }}
                 >
