@@ -44,15 +44,27 @@ const ArtDuelVoting = () => {
       }
 
       try {
-        // Get user's building
-        const myUser = connectedUsers.find(u => u.userId === user.id);
-        if (!myUser) {
-          setError('Please select a building first.');
-          setLoading(false);
-          return;
-        }
+        // Get user's building from profile (more reliable than connectedUsers)
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('current_building_id')
+          .eq('user_id', user.id)
+          .single();
 
-        setMyBuildingId(myUser.buildingId);
+        if (profileError || !profileData?.current_building_id) {
+          // Fallback to connectedUsers if profile doesn't have building
+          const myUser = connectedUsers.find(u => u.userId === user.id);
+          if (!myUser) {
+            setError('Please select a building first.');
+            setLoading(false);
+            return;
+          }
+          setMyBuildingId(myUser.buildingId);
+          console.log('Using building from connectedUsers:', myUser.buildingId);
+        } else {
+          setMyBuildingId(profileData.current_building_id);
+          console.log('Using building from profile:', profileData.current_building_id);
+        }
 
         // Get today's word ID
         const today = new Date().toISOString().split('T')[0];
@@ -575,6 +587,15 @@ const ArtDuelVoting = () => {
                       )}
                       {user && drawing.user_id !== user.id && drawing.building_id === myBuildingId && (
                         <span className="text-xs text-muted-foreground font-mono">Your Building</span>
+                      )}
+                      {/* Debug info - remove in production */}
+                      {process.env.NODE_ENV === 'development' && user && (
+                        <div className="text-[8px] text-muted-foreground/50 mt-1">
+                          Debug: drawing.user_id={drawing.user_id?.substring(0, 8)}, 
+                          user.id={user.id?.substring(0, 8)}, 
+                          drawing.building={drawing.building_id}, 
+                          myBuilding={myBuildingId}
+                        </div>
                       )}
                     </div>
                   </div>
