@@ -35,7 +35,7 @@ export default function GeolocationStatus() {
       setLocation({
         latitude: null,
         longitude: null,
-        error: 'Geolocatie wordt niet ondersteund door je browser',
+        error: 'Geolocation is not supported by your browser',
         loading: false,
         permissionDenied: false,
       });
@@ -45,7 +45,7 @@ export default function GeolocationStatus() {
     const options: PositionOptions = {
       enableHighAccuracy: true,
       timeout: 10000,
-      maximumAge: 0, // Altijd verse locatie ophalen
+      maximumAge: 0, // Always fetch fresh location
     };
 
     navigator.geolocation.getCurrentPosition(
@@ -59,24 +59,24 @@ export default function GeolocationStatus() {
           permissionDenied: false,
         });
 
-        // Check of we op een campus zijn
+        // Check if we're on a campus
         const check = isOnCampus(latitude, longitude);
         setCampusCheck(check);
       },
       (error) => {
-        let errorMessage = 'Locatie kon niet worden bepaald';
+        let errorMessage = 'Location could not be determined';
         let permissionDenied = false;
 
         switch (error.code) {
           case error.PERMISSION_DENIED:
-            errorMessage = 'Geolocatie toegang geweigerd. Sta toegang toe om te zien of je op school bent.';
+            errorMessage = 'Geolocation access denied. Grant access to see if you\'re at school.';
             permissionDenied = true;
             break;
           case error.POSITION_UNAVAILABLE:
-            errorMessage = 'Locatie informatie niet beschikbaar';
+            errorMessage = 'Location information not available';
             break;
           case error.TIMEOUT:
-            errorMessage = 'Locatie request timeout';
+            errorMessage = 'Location request timeout';
             break;
         }
 
@@ -110,19 +110,19 @@ export default function GeolocationStatus() {
         setCampusCheck(check);
       },
       (error) => {
-        let errorMessage = 'Locatie kon niet worden bepaald';
+        let errorMessage = 'Location could not be determined';
         let permissionDenied = false;
 
         switch (error.code) {
           case error.PERMISSION_DENIED:
-            errorMessage = 'Geolocatie toegang geweigerd';
+            errorMessage = 'Geolocation access denied';
             permissionDenied = true;
             break;
           case error.POSITION_UNAVAILABLE:
-            errorMessage = 'Locatie informatie niet beschikbaar';
+            errorMessage = 'Location information not available';
             break;
           case error.TIMEOUT:
-            errorMessage = 'Locatie request timeout';
+            errorMessage = 'Location request timeout';
             break;
         }
 
@@ -159,12 +159,12 @@ export default function GeolocationStatus() {
           />
           <div className="flex flex-col gap-1 flex-1">
             <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Locatie Status
+              Location Status
             </span>
 
             {location.loading && (
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                Locatie ophalen...
+                Fetching location...
               </span>
             )}
 
@@ -178,7 +178,7 @@ export default function GeolocationStatus() {
                     onClick={handleRequestLocation}
                     className="text-xs px-3 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 transition-colors"
                   >
-                    Probeer opnieuw
+                    Try again
                   </button>
                 )}
               </div>
@@ -189,7 +189,7 @@ export default function GeolocationStatus() {
                 {campusCheck.isOnCampus ? (
                   <div className="flex flex-col gap-1">
                     <span className="text-sm font-semibold text-green-600 dark:text-green-400">
-                      🎓 Welkom op school!
+                      🎓 Welcome to school!
                     </span>
                     {campusCheck.nearestCampus && (
                       <span className="text-xs text-zinc-600 dark:text-zinc-400">
@@ -197,24 +197,24 @@ export default function GeolocationStatus() {
                       </span>
                     )}
                     <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {campusCheck.distance}m van campus
+                      {campusCheck.distance}m from campus
                     </span>
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1">
                     <span className="text-sm font-semibold text-orange-600 dark:text-orange-400">
-                      🏠 Je bent niet op school
+                      🏠 You're not at school
                     </span>
                     {campusCheck.nearestCampus && (
                       <span className="text-xs text-zinc-600 dark:text-zinc-400">
-                        Dichtstbijzijnde: {campusCheck.nearestCampus.name}
+                        Nearest: {campusCheck.nearestCampus.name}
                       </span>
                     )}
                     <span className="text-xs text-zinc-500 dark:text-zinc-400">
                       {campusCheck.distance > 1000
                         ? `${(campusCheck.distance / 1000).toFixed(1)} km`
                         : `${campusCheck.distance} m`}{' '}
-                      van dichtstbijzijnde campus
+                      from nearest campus
                     </span>
                   </div>
                 )}
@@ -224,7 +224,7 @@ export default function GeolocationStatus() {
             {location.latitude && location.longitude && (
               <div className="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-700">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400 break-all">
-                  Jouw locatie: {location.latitude.toFixed(6)},{' '}
+                  Your location: {location.latitude.toFixed(6)},{' '}
                   {location.longitude.toFixed(6)}
                 </span>
                 {campusCheck?.nearestCampus && (

@@ -85,7 +85,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
   };
 
   const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
   return (

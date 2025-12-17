@@ -19,7 +19,7 @@ const DailyChallenges = () => {
     {
       id: '1',
       title: 'WORD CHAIN',
-      description: 'Spreek af in de Core en vul elkaars woorden aan. Fysieke meetup required!',
+      description: 'Meet up in the Core and complete each other\'s words. Physical meetup required!',
       icon: <MessageSquare className="w-6 h-6" />,
       participants: 24,
       timeLeft: '2h 34m',
@@ -30,7 +30,7 @@ const DailyChallenges = () => {
     {
       id: '2',
       title: 'MEME BATTLE',
-      description: 'Maak de beste meme van de dag. Alle gebouwen stemmen!',
+      description: 'Create the best meme of the day. All buildings vote!',
       icon: <Image className="w-6 h-6" />,
       participants: 67,
       timeLeft: '5h 12m',
@@ -41,7 +41,7 @@ const DailyChallenges = () => {
     {
       id: '3',
       title: 'ART DUEL',
-      description: 'Maak een tekening en laat de gebouwen stemmen op de beste.',
+      description: 'Create a drawing and let the buildings vote for the best one.',
       icon: <Palette className="w-6 h-6" />,
       participants: 45,
       timeLeft: '1h 45m',
@@ -52,7 +52,7 @@ const DailyChallenges = () => {
     {
       id: '4',
       title: 'SPEED QUIZ',
-      description: 'Beantwoord 10 nerd trivia vragen zo snel mogelijk.',
+      description: 'Answer 10 nerd trivia questions as fast as possible.',
       icon: <Zap className="w-6 h-6" />,
       participants: 0,
       timeLeft: 'Starts in 30m',

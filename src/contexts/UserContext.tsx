@@ -6,7 +6,7 @@ interface ConnectedUser {
   userId: string;
   buildingId: string;
   timestamp: number;
-  locationVerified: boolean; // Alleen true als locatie succesvol is geverifieerd
+  locationVerified: boolean; // Only true if location is successfully verified
 }
 
 interface UserContextType {
@@ -28,7 +28,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [connectedUsers, setConnectedUsers] = useState<ConnectedUser[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  // Genereer of haal user ID op
+  // Generate or retrieve user ID
   useEffect(() => {
     let userId = localStorage.getItem(USER_ID_KEY);
     if (!userId) {
@@ -138,17 +138,17 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const addUser = (buildingId: string, locationVerified: boolean) => {
     if (!currentUserId) return;
 
-    // Alleen toevoegen als locatie geverifieerd is
+    // Only add if location is verified
     if (!locationVerified) {
       console.warn('Cannot add user without verified location');
       return;
     }
 
     setConnectedUsers((prev) => {
-      // Verwijder gebruiker van andere gebouwen
+      // Remove user from other buildings
       const filtered = prev.filter((user) => user.userId !== currentUserId);
       
-      // Voeg toe aan nieuw gebouw
+      // Add to new building
       const updated = [
         ...filtered,
         {

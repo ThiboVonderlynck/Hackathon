@@ -8,7 +8,7 @@ import TerminalHeader from '@/components/TerminalHeader';
 import BuildingSelector from '@/components/BuildingSelector';
 import GlobalChat from '@/components/GlobalChat';
 import DailyChallenges from '@/components/DailyChallenges';
-import Leaderboard from '@/components/Leaderboard';
+import LeaderBoard from '@/components/Leaderboard';
 import Navigation from '@/components/Navigation';
 import UserProfile from '@/components/UserProfile';
 import { Button } from '@/components/ui/button';
@@ -17,13 +17,13 @@ import { useUsers } from '@/contexts/UserContext';
 
 type Tab = 'home' | 'chat' | 'challenges' | 'leaderboard' | 'profile';
 
-// Kleuren toewijzen aan campussen
+// Assign colors to campuses
 const colorMap = ['green', 'cyan', 'magenta', 'yellow', 'green', 'cyan', 'magenta', 'yellow'];
 
-// Map campussen naar gebouwen formaat
+// Map campuses to buildings format
 const mapCampusesToBuildings = () => {
   return howestCampuses.map((campus, index) => {
-    // Genereer een korte code uit de campus naam
+    // Generate a short code from the campus name
     const code = campus.name
       .replace('Campus Kortrijk ', '')
       .replace('Campus ', '')
@@ -37,10 +37,10 @@ const mapCampusesToBuildings = () => {
       name: campus.name.replace('Campus Kortrijk ', '').replace('Campus ', ''),
       code: code,
       color: colorMap[index % colorMap.length] as 'green' | 'cyan' | 'magenta' | 'yellow',
-      activeUsers: Math.floor(Math.random() * 50) + 10, // Random voor demo
-      points: Math.floor(Math.random() * 2000) + 1000, // Random voor demo
+      activeUsers: Math.floor(Math.random() * 50) + 10, // Random for demo
+      points: Math.floor(Math.random() * 2000) + 1000, // Random for demo
       isNear: false,
-      campus: campus, // Bewaar de originele campus data
+      campus: campus, // Store the original campus data
     };
   });
 };
@@ -83,7 +83,7 @@ export default function Home() {
   // Initialize buildings only on client to prevent hydration mismatch
   useEffect(() => {
     setIsMounted(true);
-    // Update buildings met echte gebruikers counts
+    // Update buildings with real user counts
     setBuildings(prevBuildings => 
       prevBuildings.map(building => ({
         ...building,
@@ -92,7 +92,7 @@ export default function Home() {
     );
   }, []);
 
-  // Update activeUsers wanneer connected users veranderen
+  // Update activeUsers when connected users change
   useEffect(() => {
     setBuildings(prevBuildings => 
       prevBuildings.map(building => ({
@@ -109,15 +109,15 @@ export default function Home() {
     setIsDetecting(true);
     setLocationError(null);
     
-    // Check voor HTTPS (vereist voor geolocation in productie)
+    // Check for HTTPS (required for geolocation in production)
     const isSecureContext = typeof window !== 'undefined' && 
       (window.location.protocol === 'https:' || 
        window.location.hostname === 'localhost' || 
        window.location.hostname === '127.0.0.1');
     
-    // Als we niet via HTTPS werken, toon duidelijke melding
+    // If we're not using HTTPS, show clear message
     if (!isSecureContext) {
-      const errorMsg = 'Geolocatie vereist HTTPS. Gebruik https:// of localhost om je locatie te detecteren.';
+      const errorMsg = 'Geolocation requires HTTPS. Use https:// or localhost to detect your location.';
       console.warn(errorMsg);
       setLocationError(errorMsg);
       setIsDetecting(false);
@@ -126,7 +126,7 @@ export default function Home() {
     }
     
     if (!navigator.geolocation) {
-      setLocationError('Geolocatie wordt niet ondersteund door je browser.');
+      setLocationError('Geolocation is not supported by your browser.');
       setIsDetecting(false);
       setHasLocationPermission(false);
       return;
@@ -135,7 +135,7 @@ export default function Home() {
     const options: PositionOptions = {
       enableHighAccuracy: true,
       timeout: 10000,
-      maximumAge: 60000, // Cache voor 1 minuut
+      maximumAge: 60000, // Cache for 1 minute
     };
     
     navigator.geolocation.getCurrentPosition(
@@ -145,10 +145,10 @@ export default function Home() {
         setUserLocation({ lat, lon });
         setHasLocationPermission(true);
         
-        // Check welke campus het dichtstbij is
+        // Check which campus is nearest
         const { nearestCampus, isOnCampus: onCampus } = isOnCampus(lat, lon);
         
-        // Update gebouwen met isNear status
+        // Update buildings with isNear status
         setBuildings(prevBuildings => 
           prevBuildings.map(building => ({
             ...building,
@@ -156,13 +156,13 @@ export default function Home() {
           }))
         );
         
-        // Selecteer automatisch de dichtstbijzijnde campus als je op campus bent
+        // Automatically select the nearest campus if you're on campus
         if (nearestCampus && onCampus) {
           setSelectedBuilding(nearestCampus.id);
-          // Voeg gebruiker toe aan context (alleen met geverifieerde locatie)
+          // Add user to context (only with verified location)
           addUser(nearestCampus.id, true);
         } else if (nearestCampus) {
-          // Niet op campus, maar wel dichtbij genoeg voor selectie
+          // Not on campus, but close enough for selection
           setSelectedBuilding(nearestCampus.id);
           addUser(nearestCampus.id, true);
         }
@@ -171,40 +171,40 @@ export default function Home() {
       },
       (error) => {
         const errorCode = error?.code ?? 'UNKNOWN';
-        const errorMessage = error?.message ?? 'Geen error message beschikbaar';
+        const errorMessage = error?.message ?? 'No error message available';
         
         setIsDetecting(false);
         setHasLocationPermission(false);
         
-        // Specifieke error handling
+        // Specific error handling
         let userErrorMessage: string | null = null;
         
-        // Check voor HTTPS/secure origin error
+        // Check for HTTPS/secure origin error
         if (errorMessage.includes('secure origins') || 
             errorMessage.includes('Only secure origins') ||
             errorMessage.includes('getCurrentPosition') && errorCode === 1) {
-          userErrorMessage = 'Geolocatie vereist HTTPS. Gebruik https:// of localhost om je locatie te detecteren.';
+          userErrorMessage = 'Geolocation requires HTTPS. Use https:// or localhost to detect your location.';
         } else {
           switch (errorCode) {
             case 1: // PERMISSION_DENIED
             case error?.PERMISSION_DENIED:
-              userErrorMessage = 'Geolocatie toegang geweigerd. Controleer je browser instellingen en geef toegang.';
+              userErrorMessage = 'Geolocation access denied. Check your browser settings and grant access.';
               break;
             case 2: // POSITION_UNAVAILABLE
             case error?.POSITION_UNAVAILABLE:
-              userErrorMessage = 'Locatie informatie niet beschikbaar. Controleer je GPS/WiFi instellingen.';
+              userErrorMessage = 'Location information not available. Check your GPS/WiFi settings.';
               break;
             case 3: // TIMEOUT
             case error?.TIMEOUT:
-              userErrorMessage = 'Locatie request timeout. Probeer het opnieuw.';
+              userErrorMessage = 'Location request timeout. Please try again.';
               break;
             default:
-              userErrorMessage = 'Locatie kon niet worden bepaald. Zorg dat je HTTPS gebruikt of localhost.';
+              userErrorMessage = 'Location could not be determined. Make sure you use HTTPS or localhost.';
           }
         }
         
         setLocationError(userErrorMessage);
-        // GEEN fallback selectie - gebruiker moet locatie gebruiken
+        // NO fallback selection - user must use location
       },
       options
     );
@@ -226,11 +226,11 @@ export default function Home() {
               animate={{ opacity: 1, y: 0 }}
               className="text-center space-y-4"
             >
-              <h1 className="font-display text-3xl md:text-4xl text-primary text-glow">
-                WELKOM, NERD
+              <h1 className="font-display text-3xl md:text-4xl text-primary text-glow mt-4">
+                WELCOME, NERD
               </h1>
               <p className="text-muted-foreground max-w-md mx-auto">
-                Connect met je medestudenten, win challenges en laat zien welk gebouw het coolste is.
+                Connect with your fellow students, win challenges and show which building is the coolest.
               </p>
               
               {!selectedBuilding && (
@@ -271,13 +271,6 @@ export default function Home() {
             <BuildingSelector
               buildings={buildings}
               selectedBuilding={selectedBuilding}
-              onSelect={(id) => {
-                // Alleen selecteren als er een geldige locatie is
-                if (userLocation && hasLocationPermission) {
-                  setSelectedBuilding(id);
-                  addUser(id, true);
-                }
-              }}
               isDetecting={isDetecting}
               hasLocationPermission={hasLocationPermission}
               userLocation={userLocation}
@@ -339,7 +332,7 @@ export default function Home() {
         return <DailyChallenges />;
 
       case 'leaderboard':
-        return <Leaderboard />;
+        return <LeaderBoard />;
 
       case 'profile':
         return <UserProfile />;
