@@ -8,7 +8,7 @@ import TerminalHeader from '@/components/TerminalHeader';
 import BuildingSelector from '@/components/BuildingSelector';
 import GlobalChat from '@/components/GlobalChat';
 import DailyChallenges from '@/components/DailyChallenges';
-import Leaderboard from '@/components/LeaderBoard';
+import Leaderboard from '@/components/Leaderboard';
 import Navigation from '@/components/Navigation';
 import UserProfile from '@/components/UserProfile';
 import { Button } from '@/components/ui/button';
