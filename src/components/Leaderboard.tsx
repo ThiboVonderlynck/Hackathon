@@ -1,5 +1,10 @@
+'use client';
+
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Trophy, TrendingUp, TrendingDown, Minus, Crown, Medal, Award } from 'lucide-react';
+import { Trophy, TrendingUp, TrendingDown, Minus, Crown, Medal, Award, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { howestCampuses } from '@/data/howestCampuses';
 
 interface BuildingScore {
   id: string;
@@ -9,16 +14,68 @@ interface BuildingScore {
   change: number;
   streak: number;
   color: string;
-  
 }
 
 const Leaderboard = () => {
-  const buildings: BuildingScore[] = [
-    { id: '1', name: 'THE CORE', code: 'CORE', points: 2450, change: 12, streak: 3, color: 'green' },
-    { id: '2', name: 'DE WEIDE', code: 'WEIDE', points: 2180, change: -5, streak: 0, color: 'cyan' },
-    { id: '3', name: 'HET STATION', code: 'STATION', points: 1920, change: 8, streak: 1, color: 'magenta' },
-    { id: '4', name: 'B-BLOK', code: 'B-BLOK', points: 1650, change: 0, streak: 0, color: 'yellow' },
-  ];
+  const [buildings, setBuildings] = useState<BuildingScore[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Map building IDs to colors
+  const colorMapArray = ['green', 'cyan', 'magenta', 'yellow', 'green', 'cyan', 'magenta', 'yellow'];
+
+  useEffect(() => {
+    const loadRankings = async () => {
+      try {
+        const { data: rankings, error } = await supabase.rpc('get_building_rankings_today');
+
+        if (error) {
+          console.error('Error loading building rankings:', error);
+          setLoading(false);
+          return;
+        }
+
+        if (rankings && rankings.length > 0) {
+          // Map rankings to BuildingScore format
+          const mappedBuildings: BuildingScore[] = rankings.map((ranking: any, index: number) => {
+            const campus = howestCampuses.find(c => c.id === ranking.building_id);
+            const code = campus?.name
+              ?.replace('Campus Kortrijk ', '')
+              ?.replace('Campus ', '')
+              ?.split(' ')
+              ?.map(word => word.substring(0, 3).toUpperCase())
+              ?.join('')
+              ?.substring(0, 8) || ranking.building_id.substring(0, 8).toUpperCase();
+            
+            const name = campus?.name
+              ?.replace('Campus Kortrijk ', '')
+              ?.replace('Campus ', '') || ranking.building_id;
+
+            return {
+              id: ranking.building_id,
+              name: name,
+              code: code,
+              points: Number(ranking.total_points),
+              change: 0, // Can be calculated later if we track historical data
+              streak: 0, // Can be calculated later if we track daily wins
+              color: colorMapArray[index % colorMapArray.length] as 'green' | 'cyan' | 'magenta' | 'yellow',
+            };
+          });
+
+          setBuildings(mappedBuildings);
+        }
+        setLoading(false);
+      } catch (err) {
+        console.error('Error loading building rankings:', err);
+        setLoading(false);
+      }
+    };
+
+    loadRankings();
+    
+    // Refresh rankings every 30 seconds
+    const interval = setInterval(loadRankings, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const colorMap: Record<string, { bg: string; text: string; border: string }> = {
     green: { bg: 'bg-building-a', text: 'text-building-a', border: 'border-building-a' },
@@ -46,6 +103,28 @@ const Leaderboard = () => {
     return <Minus className="w-4 h-4 text-muted-foreground" />;
   };
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center space-y-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground font-mono">LOADING_RANKINGS...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (buildings.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center space-y-4">
+          <Trophy className="w-12 h-12 text-muted-foreground mx-auto" />
+          <p className="text-muted-foreground">No rankings available yet</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -58,53 +137,55 @@ const Leaderboard = () => {
         </span>
       </div>
 
-      {/* Podium visualization */}
-      <div className="flex items-end justify-center gap-2 h-32 mb-8">
-        {/* 2nd place */}
-        <motion.div
-          initial={{ height: 0 }}
-          animate={{ height: '60%' }}
-          transition={{ delay: 0.2, duration: 0.5 }}
-          className={`w-20 rounded-t-lg flex flex-col items-center justify-start pt-2 ${colorMap[buildings[1].color].bg}/20 border-2 ${colorMap[buildings[1].color].border}`}
-        >
-          <Medal className="w-6 h-6 text-gray-400" />
-          <span className={`font-display text-xs ${colorMap[buildings[1].color].text} mt-1`}>
-            {buildings[1].code}
-          </span>
-          <span className="text-xs text-muted-foreground">{buildings[1].points}</span>
-        </motion.div>
+      {/* Podium visualization - only show if we have at least 3 buildings */}
+      {buildings.length >= 3 && (
+        <div className="flex items-end justify-center gap-2 h-32 mb-8">
+          {/* 2nd place */}
+          <motion.div
+            initial={{ height: 0 }}
+            animate={{ height: '60%' }}
+            transition={{ delay: 0.2, duration: 0.5 }}
+            className={`w-20 rounded-t-lg flex flex-col items-center justify-start pt-2 ${colorMap[buildings[1].color].bg}/20 border-2 ${colorMap[buildings[1].color].border}`}
+          >
+            <Medal className="w-6 h-6 text-gray-400" />
+            <span className={`font-display text-xs ${colorMap[buildings[1].color].text} mt-1`}>
+              {buildings[1].code}
+            </span>
+            <span className="text-xs text-muted-foreground">{buildings[1].points.toLocaleString()}</span>
+          </motion.div>
 
-        {/* 1st place */}
-        <motion.div
-          initial={{ height: 0 }}
-          animate={{ height: '100%' }}
-          transition={{ delay: 0.1, duration: 0.5 }}
-          className={`w-24 rounded-t-lg flex flex-col items-center justify-start pt-2 ${colorMap[buildings[0].color].bg}/30 border-2 ${colorMap[buildings[0].color].border} pulse-neon`}
-        >
-          <Crown className="w-8 h-8 text-yellow-400" />
-          <span className={`font-display text-sm ${colorMap[buildings[0].color].text} mt-1`}>
-            {buildings[0].code}
-          </span>
-          <span className="text-sm font-bold text-foreground">{buildings[0].points}</span>
-          {buildings[0].streak > 0 && (
-            <span className="text-xs text-neon-yellow">🔥 {buildings[0].streak} day streak</span>
-          )}
-        </motion.div>
+          {/* 1st place */}
+          <motion.div
+            initial={{ height: 0 }}
+            animate={{ height: '100%' }}
+            transition={{ delay: 0.1, duration: 0.5 }}
+            className={`w-24 rounded-t-lg flex flex-col items-center justify-start pt-2 ${colorMap[buildings[0].color].bg}/30 border-2 ${colorMap[buildings[0].color].border} pulse-neon`}
+          >
+            <Crown className="w-8 h-8 text-yellow-400" />
+            <span className={`font-display text-sm ${colorMap[buildings[0].color].text} mt-1`}>
+              {buildings[0].code}
+            </span>
+            <span className="text-sm font-bold text-foreground">{buildings[0].points.toLocaleString()}</span>
+            {buildings[0].streak > 0 && (
+              <span className="text-xs text-neon-yellow">🔥 {buildings[0].streak} day streak</span>
+            )}
+          </motion.div>
 
-        {/* 3rd place */}
-        <motion.div
-          initial={{ height: 0 }}
-          animate={{ height: '40%' }}
-          transition={{ delay: 0.3, duration: 0.5 }}
-          className={`w-20 rounded-t-lg flex flex-col items-center justify-start pt-2 ${colorMap[buildings[2].color].bg}/20 border-2 ${colorMap[buildings[2].color].border}`}
-        >
-          <Award className="w-6 h-6 text-amber-600" />
-          <span className={`font-display text-xs ${colorMap[buildings[2].color].text} mt-1`}>
-            {buildings[2].code}
-          </span>
-          <span className="text-xs text-muted-foreground">{buildings[2].points}</span>
-        </motion.div>
-      </div>
+          {/* 3rd place */}
+          <motion.div
+            initial={{ height: 0 }}
+            animate={{ height: '40%' }}
+            transition={{ delay: 0.3, duration: 0.5 }}
+            className={`w-20 rounded-t-lg flex flex-col items-center justify-start pt-2 ${colorMap[buildings[2].color].bg}/20 border-2 ${colorMap[buildings[2].color].border}`}
+          >
+            <Award className="w-6 h-6 text-amber-600" />
+            <span className={`font-display text-xs ${colorMap[buildings[2].color].text} mt-1`}>
+              {buildings[2].code}
+            </span>
+            <span className="text-xs text-muted-foreground">{buildings[2].points.toLocaleString()}</span>
+          </motion.div>
+        </div>
+      )}
 
       {/* Full list */}
       <div className="space-y-2">
@@ -146,15 +227,8 @@ const Leaderboard = () => {
                 <div className="font-display text-lg font-bold text-foreground">
                   {building.points.toLocaleString()}
                 </div>
-                <div className="flex items-center gap-1 justify-end">
-                  {getChangeIcon(building.change)}
-                  <span className={`text-xs ${
-                    building.change > 0 ? 'text-primary' :
-                    building.change < 0 ? 'text-destructive' :
-                    'text-muted-foreground'
-                  }`}>
-                    {building.change > 0 ? '+' : ''}{building.change}%
-                  </span>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {building.points === 0 ? 'No points yet' : 'Total points'}
                 </div>
               </div>
             </motion.div>
