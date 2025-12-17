@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Smile, Hash, AtSign } from 'lucide-react';
 import { Button } from './ui/button';
+import { supabase } from '@/lib/supabase';
+import { useUsers } from '@/contexts/UserContext';
 
 interface Message {
   id: string;
@@ -17,45 +19,27 @@ interface GlobalChatProps {
   buildingColor: string;
 }
 
-const now = Date.now();
+// Generate a random username from user ID
+const generateUsername = (userId: string): string => {
+  const adjectives = ['H4ck3r', 'Code', 'Binary', 'Nerdy', 'Tech', 'Dev', 'Cyber', 'Pixel', 'Byte', 'Script'];
+  const nouns = ['Pete', 'Queen', 'Bob', 'Nina', 'Alex', 'Sam', 'Max', 'Zoe', 'Rio', 'Sky'];
+  const hash = userId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const adj = adjectives[hash % adjectives.length];
+  const noun = nouns[(hash * 7) % nouns.length];
+  return `${adj}_${noun}`;
+};
 
 const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      user: 'H4ck3r_Pete',
-      userColor: 'green',
-      building: 'CORE',
-      text: 'Wie doet er mee met de meme challenge?',
-      timestamp: new Date(now - 120000),
-    },
-    {
-      id: '2',
-      user: 'CodeQueen',
-      userColor: 'cyan',
-      building: 'WEIDE',
-      text: 'Just deployed my first edge function 🚀',
-      timestamp: new Date(now - 60000),
-    },
-    {
-      id: '3',
-      user: 'BinaryBob',
-      userColor: 'magenta',
-      building: 'STATION',
-      text: '01001000 01101001 (that means Hi)',
-      timestamp: new Date(now - 30000),
-    },
-    {
-      id: '4',
-      user: 'NerdyNina',
-      userColor: 'yellow',
-      building: 'B-BLOK',
-      text: 'Iemand zin om samen te lunchen in de core?',
-      timestamp: new Date(now),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { connectedUsers } = useUsers();
+  
+  // Get current user ID from localStorage
+  const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('nerdhub_user_id') : null;
+  const username = currentUserId ? generateUsername(currentUserId) : 'Anonymous';
 
   const colorMap: Record<string, string> = {
     green: 'text-building-a',
@@ -64,24 +48,101 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
     yellow: 'text-building-d',
   };
 
+  // Load initial messages and set up real-time subscription
+  useEffect(() => {
+    if (!supabase) {
+      setError('Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY');
+      setLoading(false);
+      return;
+    }
+
+    // Load initial messages
+    const loadMessages = async () => {
+      try {
+        const { data, error: fetchError } = await supabase
+          .from('messages')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (fetchError) throw fetchError;
+
+        if (data) {
+          const formattedMessages: Message[] = data
+            .reverse() // Reverse to show oldest first
+            .map((msg) => ({
+              id: msg.id,
+              user: msg.username,
+              userColor: msg.building_color,
+              building: msg.building_code,
+              text: msg.message_text,
+              timestamp: new Date(msg.created_at),
+            }));
+          setMessages(formattedMessages);
+        }
+        setLoading(false);
+      } catch (err) {
+        console.error('Error loading messages:', err);
+        setError('Failed to load messages');
+        setLoading(false);
+      }
+    };
+
+    loadMessages();
+
+    // Set up real-time subscription for new messages
+    const channel = supabase
+      .channel('messages')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+        },
+        (payload) => {
+          const newMessage = payload.new;
+          const formattedMessage: Message = {
+            id: newMessage.id,
+            user: newMessage.username,
+            userColor: newMessage.building_color,
+            building: newMessage.building_code,
+            text: newMessage.message_text,
+            timestamp: new Date(newMessage.created_at),
+          };
+          setMessages((prev) => [...prev, formattedMessage]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  const handleSend = async () => {
+    if (!input.trim() || !currentUserId || !supabase) return;
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      user: 'You',
-      userColor: buildingColor,
-      building: currentBuilding,
-      text: input,
-      timestamp: new Date(),
-    };
+    try {
+      const { error: insertError } = await supabase.from('messages').insert({
+        user_id: currentUserId,
+        username: username,
+        building_code: currentBuilding,
+        building_color: buildingColor,
+        message_text: input.trim(),
+      });
 
-    setMessages([...messages, newMessage]);
-    setInput('');
+      if (insertError) throw insertError;
+
+      setInput('');
+    } catch (err) {
+      console.error('Error sending message:', err);
+      setError('Failed to send message. Please try again.');
+    }
   };
 
   const formatTime = (date: Date) => {
@@ -101,6 +162,21 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+        {loading && (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-muted-foreground">Loading messages...</p>
+          </div>
+        )}
+        {error && (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-destructive">{error}</p>
+          </div>
+        )}
+        {!loading && !error && messages.length === 0 && (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-muted-foreground">No messages yet. Be the first to say something!</p>
+          </div>
+        )}
         <AnimatePresence initial={false}>
           {messages.map((message) => (
             <motion.div
