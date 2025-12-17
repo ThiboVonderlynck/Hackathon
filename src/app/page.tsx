@@ -263,7 +263,7 @@ export default function Home() {
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
-            className="fixed inset-0 z-[100] bg-background flex items-center justify-center"
+            className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center"
           >
             <motion.div
               initial={{ scale: 0.8, opacity: 0 }}
