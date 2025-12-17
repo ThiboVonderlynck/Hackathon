@@ -44,15 +44,27 @@ const ArtDuelVoting = () => {
       }
 
       try {
-        // Get user's building
-        const myUser = connectedUsers.find(u => u.userId === user.id);
-        if (!myUser) {
-          setError('Please select a building first.');
-          setLoading(false);
-          return;
-        }
+        // Get user's building from profile (more reliable than connectedUsers)
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('current_building_id')
+          .eq('user_id', user.id)
+          .single();
 
-        setMyBuildingId(myUser.buildingId);
+        if (profileError || !profileData?.current_building_id) {
+          // Fallback to connectedUsers if profile doesn't have building
+          const myUser = connectedUsers.find(u => u.userId === user.id);
+          if (!myUser) {
+            setError('Please select a building first.');
+            setLoading(false);
+            return;
+          }
+          setMyBuildingId(myUser.buildingId);
+          console.log('Using building from connectedUsers:', myUser.buildingId);
+        } else {
+          setMyBuildingId(profileData.current_building_id);
+          console.log('Using building from profile:', profileData.current_building_id);
+        }
 
         // Get today's word ID
         const today = new Date().toISOString().split('T')[0];
@@ -274,31 +286,54 @@ const ArtDuelVoting = () => {
   }, [user, sessionId, connectedUsers]);
 
   const handleVote = async (drawingId: string) => {
-    if (!user || !myBuildingId || voting) {
-      console.log('Vote blocked:', { user: !!user, myBuildingId, voting, submissionEnded });
+    console.log('handleVote called:', { drawingId, user: !!user, myBuildingId, voting });
+    
+    if (!user) {
+      console.error('Vote blocked: no user');
+      alert('Please log in to vote');
       return;
     }
     
-    // Allow voting even before deadline if user wants to vote early
-    // if (!submissionEnded) {
-    //   console.log('Voting not yet enabled - deadline has not passed');
-    //   return;
-    // }
+    if (!myBuildingId) {
+      console.error('Vote blocked: no building selected');
+      alert('Please select a building first');
+      return;
+    }
+    
+    if (voting) {
+      console.log('Vote already in progress');
+      return;
+    }
 
+    // Get drawing to check building
+    const drawing = drawings.find(d => d.id === drawingId);
+    if (!drawing) {
+      console.error('Drawing not found:', drawingId);
+      return;
+    }
+
+    // Only allow voting on drawings from other buildings (not your own building)
+    if (drawing.building_id === myBuildingId) {
+      console.log('Cannot vote on drawings from your own building');
+      return;
+    }
+    
+    // Also prevent voting on your own drawing
+    if (drawing.user_id === user.id) {
+      console.log('Cannot vote on your own drawing');
+      return;
+    }
+
+    // Check if user already voted on this drawing
+    if (drawing.has_voted) {
+      console.log('Already voted on this drawing');
+      return;
+    }
+
+    console.log('Setting voting state and inserting vote...');
     setVoting(drawingId);
 
     try {
-      // Get drawing to check building
-      const drawing = drawings.find(d => d.id === drawingId);
-      if (!drawing) return;
-
-      // Check if user already voted on this drawing
-      if (drawing.has_voted) {
-        console.log('Already voted on this drawing');
-        setVoting(null);
-        return;
-      }
-
       console.log('Inserting vote:', { drawingId, voterId: user.id, voterBuildingId: myBuildingId });
 
       // Insert vote
@@ -464,41 +499,103 @@ const ArtDuelVoting = () => {
 
                     {/* Vote count */}
                     <div className="flex items-center justify-between">
-                      <div 
-                        className={`flex items-center gap-2 ${
-                          drawing.building_id !== myBuildingId && !drawing.has_voted && !voting
-                            ? 'cursor-pointer hover:opacity-80 transition-opacity' 
-                            : 'cursor-default'
+                      <button
+                        type="button"
+                        className={`flex items-center gap-2 border-0 bg-transparent p-0 ${
+                          user && drawing.user_id !== user.id && drawing.building_id !== myBuildingId && !drawing.has_voted && !voting
+                            ? 'cursor-pointer hover:opacity-80 transition-opacity active:scale-95' 
+                            : 'cursor-default opacity-50'
                         }`}
-                        onClick={() => {
-                          if (drawing.building_id !== myBuildingId && !drawing.has_voted && !voting) {
-                            handleVote(drawing.id);
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (!user) return;
+                          
+                          console.log('=== HEART CLICKED ===');
+                          console.log('Drawing ID:', drawing.id);
+                          console.log('Drawing user:', drawing.user_id);
+                          console.log('My user ID:', user.id);
+                          console.log('Drawing building:', drawing.building_id);
+                          console.log('My building:', myBuildingId);
+                          console.log('Has voted:', drawing.has_voted);
+                          console.log('Voting state:', voting);
+                          
+                          if (drawing.user_id === user.id) {
+                            console.log('❌ Cannot vote on your own drawing');
+                            return;
                           }
+                          
+                          if (drawing.building_id === myBuildingId) {
+                            console.log('❌ Cannot vote on drawings from your own building');
+                            return;
+                          }
+                          
+                          if (drawing.has_voted) {
+                            console.log('❌ Already voted');
+                            return;
+                          }
+                          
+                          if (voting) {
+                            console.log('❌ Vote in progress');
+                            return;
+                          }
+                          
+                          console.log('✅ Calling handleVote');
+                          handleVote(drawing.id);
                         }}
-                        title={drawing.building_id === myBuildingId 
-                          ? 'Your Building' 
-                          : drawing.has_voted 
-                            ? 'You already voted' 
-                            : 'Click to vote'}
+                        disabled={!user || drawing.user_id === user.id || drawing.building_id === myBuildingId || drawing.has_voted || !!voting}
+                        title={!user
+                          ? 'Please log in'
+                          : drawing.user_id === user.id
+                            ? 'Your Drawing' 
+                            : drawing.building_id === myBuildingId
+                              ? 'Your Building'
+                            : drawing.has_voted 
+                              ? 'You already voted' 
+                              : 'Click to vote'}
+                        style={{ 
+                          userSelect: 'none',
+                          WebkitUserSelect: 'none',
+                          outline: 'none'
+                        }}
                       >
-                        <Heart className={`w-4 h-4 ${drawing.has_voted ? 'text-destructive fill-destructive' : 'text-muted-foreground'}`} />
+                        <Heart 
+                          className={`w-4 h-4 ${drawing.has_voted ? 'text-destructive fill-destructive' : 'text-muted-foreground'}`}
+                        />
                         <span className="text-sm font-mono">{drawing.vote_count} votes</span>
-                      </div>
+                      </button>
 
-                      {/* Vote button - only show for other buildings */}
-                      {drawing.building_id !== myBuildingId && (
+                      {/* Vote button - only show for other users' drawings from other buildings */}
+                      {user && drawing.user_id !== user.id && drawing.building_id !== myBuildingId && (
                         <Button
                           size="sm"
                           variant={drawing.has_voted ? 'outline' : 'default'}
-                          onClick={() => handleVote(drawing.id)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log('Vote button clicked');
+                            handleVote(drawing.id);
+                          }}
                           disabled={drawing.has_voted || voting === drawing.id}
                           className="text-xs"
                         >
                           {drawing.has_voted ? 'Voted' : voting === drawing.id ? 'Voting...' : 'Vote'}
                         </Button>
                       )}
-                      {drawing.building_id === myBuildingId && (
+                      {user && drawing.user_id === user.id && (
+                        <span className="text-xs text-muted-foreground font-mono">Your Drawing</span>
+                      )}
+                      {user && drawing.user_id !== user.id && drawing.building_id === myBuildingId && (
                         <span className="text-xs text-muted-foreground font-mono">Your Building</span>
+                      )}
+                      {/* Debug info - remove in production */}
+                      {process.env.NODE_ENV === 'development' && user && (
+                        <div className="text-[8px] text-muted-foreground/50 mt-1">
+                          Debug: drawing.user_id={drawing.user_id?.substring(0, 8)}, 
+                          user.id={user.id?.substring(0, 8)}, 
+                          drawing.building={drawing.building_id}, 
+                          myBuilding={myBuildingId}
+                        </div>
                       )}
                     </div>
                   </div>

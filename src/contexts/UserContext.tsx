@@ -116,30 +116,46 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, [currentUserId]);
 
   // Initialize Socket.io connection (keep for backward compatibility)
+  // Note: Socket.io doesn't work well with Vercel serverless functions
+  // We primarily use Supabase Realtime, but keep socket.io for local development
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    
+    // Only connect to socket.io in development or if explicitly enabled
+    // In production (Vercel), socket.io won't work with serverless functions
+    const isProduction = process.env.NODE_ENV === 'production';
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+    
+    // Skip socket.io in production unless explicitly configured
+    if (isProduction && !socketUrl) {
+      console.log('Skipping socket.io connection in production (using Supabase Realtime instead)');
+      return;
+    }
 
-    // Connect to Socket.io server
-    const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 5,
-    });
+    try {
+      // Connect to Socket.io server
+      const socket = io(socketUrl || window.location.origin, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 3, // Reduced attempts
+        timeout: 5000, // Shorter timeout
+      });
 
-    socketRef.current = socket;
+      socketRef.current = socket;
 
-    // Listen for users updates from server
-    socket.on('users_updated', (users: ConnectedUser[]) => {
-      const now = Date.now();
-      const activeUsers = users.filter(
-        (user) => now - user.timestamp < USER_TIMEOUT
-      );
-      setConnectedUsers(activeUsers);
-      // Also update localStorage as backup
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(activeUsers));
-    });
+      // Listen for users updates from server
+      socket.on('users_updated', (users: ConnectedUser[]) => {
+        const now = Date.now();
+        const activeUsers = users.filter(
+          (user) => now - user.timestamp < USER_TIMEOUT
+        );
+        setConnectedUsers(activeUsers);
+        // Also update localStorage as backup
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(activeUsers));
+      });
 
+<<<<<<< HEAD
     socket.on('connect', () => {
       console.log('Socket.io connected');
       // Don't auto-rejoin here - let addUser handle it when needed
@@ -161,6 +177,44 @@ export function UserProvider({ children }: { children: ReactNode }) {
       socket.disconnect();
       socketRef.current = null;
     };
+=======
+      socket.on('connect', () => {
+        console.log('Socket.io connected');
+        // If user was already added to a building, rejoin
+        if (currentUserId && currentBuildingRef.current) {
+          socket.emit('user_join', {
+            userId: currentUserId,
+            buildingId: currentBuildingRef.current,
+            locationVerified: true,
+          });
+        }
+      });
+
+      socket.on('disconnect', () => {
+        console.log('Socket.io disconnected');
+      });
+
+      socket.on('connect_error', (error) => {
+        // Silently fail in production - Supabase Realtime is the primary method
+        if (!isProduction) {
+          console.error('Socket.io connection error:', error);
+        }
+      });
+
+      return () => {
+        if (socket.connected && currentUserId) {
+          socket.emit('user_leave', { userId: currentUserId });
+        }
+        socket.disconnect();
+        socketRef.current = null;
+      };
+    } catch (error) {
+      // Fail silently - Supabase Realtime will handle user tracking
+      if (!isProduction) {
+        console.error('Failed to initialize socket.io:', error);
+      }
+    }
+>>>>>>> origin/develop
   }, [currentUserId]);
 
   // Laad gebruikers uit localStorage bij mount

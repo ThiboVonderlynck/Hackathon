@@ -7,6 +7,7 @@ import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { supabase } from '@/lib/supabase';
 import { useUsers } from '@/contexts/UserContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { moderateMessage } from '@/lib/chatModeration';
 
 interface Message {
   id: string;
@@ -161,19 +162,26 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
       return;
     }
 
+    // Moderate message before sending
+    const moderation = moderateMessage(input.trim(), currentUserId);
+    
+    if (!moderation.allowed) {
+      setError(moderation.reason || 'Message was blocked by moderation');
+      return;
+    }
+
     try {
       const { error: insertError } = await supabase.from('messages').insert({
         user_id: currentUserId,
         username: username,
         building_code: currentBuilding,
         building_color: buildingColor,
-        message_text: input.trim(),
+        message_text: moderation.filteredText || input.trim(),
       });
 
       if (insertError) throw insertError;
 
       setInput('');
-      setError(null);
     } catch (err) {
       console.error('Error sending message:', err);
       setError('Failed to send message. Please try again.');
@@ -193,6 +201,11 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setInput(value);
+    
+    // Clear error when user starts typing
+    if (error) {
+      setError(null);
+    }
     
     // Find @ mention in the input
     const cursorPosition = e.target.selectionStart || 0;
@@ -321,12 +334,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
             <p className="text-muted-foreground">Loading messages...</p>
           </div>
         )}
-        {error && (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-destructive">{error}</p>
-          </div>
-        )}
-        {!loading && !error && messages.length === 0 && (
+        {!loading && messages.length === 0 && (
           <div className="flex items-center justify-center h-full">
             <p className="text-muted-foreground">No messages yet. Be the first to say something!</p>
           </div>
@@ -377,6 +385,12 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
 
       {/* Input */}
       <div className="p-4 border-t border-border bg-card">
+        {/* Error message displayed below input */}
+        {error && (
+          <div className="mb-3 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/20">
+            <p className="text-sm text-destructive">{error}</p>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <div className="flex-1 relative">
             <input
