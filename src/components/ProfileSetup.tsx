@@ -199,7 +199,7 @@ const ProfileSetup = ({ onComplete }: { onComplete: () => void }) => {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="nerdy_student_42"
-                  className="bg-background border-primary/30 focus:border-primary font-mono text-sm"
+                  className="bg-background border-primary/30 focus:border-primary focus-visible:ring-1 focus-visible:ring-primary/20 focus-visible:ring-offset-0 font-mono text-sm"
                   required
                   maxLength={30}
                 />
@@ -218,11 +218,11 @@ const ProfileSetup = ({ onComplete }: { onComplete: () => void }) => {
                       type="button"
                       onClick={() => setTag(availableTag)}
                       className={`
-                        px-3 py-2 rounded-lg border text-sm font-mono transition-all
+                        px-3 py-2 rounded-lg border-2 text-sm font-mono transition-all
                         ${
                           tag === availableTag
-                            ? 'bg-primary/20 border-primary text-primary'
-                            : 'bg-background border-primary/30 text-muted-foreground hover:border-primary/50'
+                            ? 'bg-primary/30 border-primary text-primary shadow-[0_0_10px_hsl(var(--primary)/0.5)] font-bold'
+                            : 'bg-background border-primary/30 text-muted-foreground hover:border-primary/50 hover:text-foreground'
                         }
                       `}
                     >
