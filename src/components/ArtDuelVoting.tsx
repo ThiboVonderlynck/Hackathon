@@ -300,9 +300,15 @@ const ArtDuelVoting = () => {
       return;
     }
 
-    // Only allow voting on drawings from other buildings
+    // Only allow voting on drawings from other buildings (not your own building)
     if (drawing.building_id === myBuildingId) {
-      console.log('Cannot vote on own building');
+      console.log('Cannot vote on drawings from your own building');
+      return;
+    }
+    
+    // Also prevent voting on your own drawing
+    if (drawing.user_id === user.id) {
+      console.log('Cannot vote on your own drawing');
       return;
     }
 
@@ -484,22 +490,31 @@ const ArtDuelVoting = () => {
                       <button
                         type="button"
                         className={`flex items-center gap-2 border-0 bg-transparent p-0 ${
-                          drawing.building_id !== myBuildingId && !drawing.has_voted && !voting
+                          user && drawing.user_id !== user.id && drawing.building_id !== myBuildingId && !drawing.has_voted && !voting
                             ? 'cursor-pointer hover:opacity-80 transition-opacity active:scale-95' 
                             : 'cursor-default opacity-50'
                         }`}
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
+                          if (!user) return;
+                          
                           console.log('=== HEART CLICKED ===');
                           console.log('Drawing ID:', drawing.id);
+                          console.log('Drawing user:', drawing.user_id);
+                          console.log('My user ID:', user.id);
                           console.log('Drawing building:', drawing.building_id);
                           console.log('My building:', myBuildingId);
                           console.log('Has voted:', drawing.has_voted);
                           console.log('Voting state:', voting);
                           
+                          if (drawing.user_id === user.id) {
+                            console.log('❌ Cannot vote on your own drawing');
+                            return;
+                          }
+                          
                           if (drawing.building_id === myBuildingId) {
-                            console.log('❌ Cannot vote on own building');
+                            console.log('❌ Cannot vote on drawings from your own building');
                             return;
                           }
                           
@@ -516,12 +531,16 @@ const ArtDuelVoting = () => {
                           console.log('✅ Calling handleVote');
                           handleVote(drawing.id);
                         }}
-                        disabled={drawing.building_id === myBuildingId || drawing.has_voted || !!voting}
-                        title={drawing.building_id === myBuildingId 
-                          ? 'Your Building' 
-                          : drawing.has_voted 
-                            ? 'You already voted' 
-                            : 'Click to vote'}
+                        disabled={!user || drawing.user_id === user.id || drawing.building_id === myBuildingId || drawing.has_voted || !!voting}
+                        title={!user
+                          ? 'Please log in'
+                          : drawing.user_id === user.id
+                            ? 'Your Drawing' 
+                            : drawing.building_id === myBuildingId
+                              ? 'Your Building'
+                            : drawing.has_voted 
+                              ? 'You already voted' 
+                              : 'Click to vote'}
                         style={{ 
                           userSelect: 'none',
                           WebkitUserSelect: 'none',
@@ -534,8 +553,8 @@ const ArtDuelVoting = () => {
                         <span className="text-sm font-mono">{drawing.vote_count} votes</span>
                       </button>
 
-                      {/* Vote button - only show for other buildings */}
-                      {drawing.building_id !== myBuildingId && (
+                      {/* Vote button - only show for other users' drawings from other buildings */}
+                      {user && drawing.user_id !== user.id && drawing.building_id !== myBuildingId && (
                         <Button
                           size="sm"
                           variant={drawing.has_voted ? 'outline' : 'default'}
@@ -551,7 +570,10 @@ const ArtDuelVoting = () => {
                           {drawing.has_voted ? 'Voted' : voting === drawing.id ? 'Voting...' : 'Vote'}
                         </Button>
                       )}
-                      {drawing.building_id === myBuildingId && (
+                      {user && drawing.user_id === user.id && (
+                        <span className="text-xs text-muted-foreground font-mono">Your Drawing</span>
+                      )}
+                      {user && drawing.user_id !== user.id && drawing.building_id === myBuildingId && (
                         <span className="text-xs text-muted-foreground font-mono">Your Building</span>
                       )}
                     </div>
