@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { useUsers } from '@/contexts/UserContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { moderateMessage } from '@/lib/chatModeration';
+import { howestCampuses } from '@/data/howestCampuses';
 
 interface Message {
   id: string;
@@ -16,6 +17,7 @@ interface Message {
   building: string;
   text: string;
   timestamp: Date;
+  isPending?: boolean; // For optimistic updates
 }
 
 interface GlobalChatProps {
@@ -51,6 +53,18 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
   const currentUserId = user?.id || (typeof window !== 'undefined' ? localStorage.getItem('nerdhub_user_id') : null);
   const username = profile?.username || (currentUserId ? generateUsername(currentUserId) : 'Anonymous');
   
+  // Get user's building code from building ID (from connectedUsers or use currentBuilding prop)
+  const myUser = connectedUsers.find(u => u.userId === user?.id);
+  const userBuildingCode = myUser ? 
+    (howestCampuses.find(c => c.id === myUser.buildingId)?.name
+      ?.replace('Campus Kortrijk ', '')
+      ?.replace('Campus ', '')
+      ?.split(' ')
+      ?.map(word => word.substring(0, 3).toUpperCase())
+      ?.join('')
+      ?.substring(0, 8) || currentBuilding) :
+    currentBuilding;
+  
   // Get unique usernames from messages
   const availableUsers = Array.from(
     new Set(messages.map((msg) => msg.user))
@@ -70,7 +84,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
     yellow: 'text-building-d',
   };
 
-  // Load initial messages and set up real-time subscription
+  // Load initial messages and set up real-time subscription - only for user's building
   useEffect(() => {
     if (!supabase) {
       setError('Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY');
@@ -78,12 +92,18 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
       return;
     }
 
-    // Load initial messages
+    if (!userBuildingCode) {
+      setLoading(false);
+      return;
+    }
+
+    // Load initial messages - only from user's building
     const loadMessages = async () => {
       try {
         const { data, error: fetchError } = await supabase
           .from('messages')
           .select('*')
+          .eq('building_code', userBuildingCode) // Filter by user's building code
           .order('created_at', { ascending: false })
           .limit(50);
 
@@ -112,7 +132,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
 
     loadMessages();
 
-    // Set up real-time subscription for new messages
+    // Set up real-time subscription for new messages - only from user's building
     const channel = supabase
       .channel('messages')
       .on(
@@ -121,18 +141,37 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
+          filter: `building_code=eq.${userBuildingCode}`, // Only listen to messages from user's building
         },
         (payload) => {
           const newMessage = payload.new;
-          const formattedMessage: Message = {
-            id: newMessage.id,
-            user: newMessage.username,
-            userColor: newMessage.building_color,
-            building: newMessage.building_code,
-            text: newMessage.message_text,
-            timestamp: new Date(newMessage.created_at),
-          };
-          setMessages((prev) => [...prev, formattedMessage]);
+          // Double check building code matches (extra safety)
+          if (newMessage.building_code === userBuildingCode) {
+            const formattedMessage: Message = {
+              id: newMessage.id,
+              user: newMessage.username,
+              userColor: newMessage.building_color,
+              building: newMessage.building_code,
+              text: newMessage.message_text,
+              timestamp: new Date(newMessage.created_at),
+            };
+            setMessages((prev) => {
+              // Check if this message already exists (from optimistic update)
+              const exists = prev.some((msg) => 
+                msg.id === formattedMessage.id || 
+                (msg.isPending && msg.user === formattedMessage.user && msg.text === formattedMessage.text && Math.abs(msg.timestamp.getTime() - formattedMessage.timestamp.getTime()) < 2000)
+              );
+              if (exists) {
+                // Replace pending message with real one
+                return prev.map((msg) => 
+                  (msg.isPending && msg.user === formattedMessage.user && msg.text === formattedMessage.text && Math.abs(msg.timestamp.getTime() - formattedMessage.timestamp.getTime()) < 2000)
+                    ? formattedMessage
+                    : msg
+                );
+              }
+              return [...prev, formattedMessage];
+            });
+          }
         }
       )
       .subscribe();
@@ -140,7 +179,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [userBuildingCode]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -170,21 +209,65 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
       return;
     }
 
+    const messageText = moderation.filteredText || input.trim();
+    const tempId = `temp-${Date.now()}-${Math.random()}`;
+
+    // Optimistic update: add message immediately to UI
+    const optimisticMessage: Message = {
+      id: tempId,
+      user: username,
+      userColor: buildingColor,
+      building: userBuildingCode || currentBuilding,
+      text: messageText,
+      timestamp: new Date(),
+      isPending: true,
+    };
+
+    setMessages((prev) => [...prev, optimisticMessage]);
+    setInput(''); // Clear input immediately
+
+    // Scroll to bottom to show new message
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 0);
+
     try {
-      const { error: insertError } = await supabase.from('messages').insert({
+      const { data, error: insertError } = await supabase.from('messages').insert({
         user_id: currentUserId,
         username: username,
-        building_code: currentBuilding,
+        building_code: userBuildingCode || currentBuilding,
         building_color: buildingColor,
-        message_text: moderation.filteredText || input.trim(),
-      });
+        message_text: messageText,
+      }).select().single();
 
       if (insertError) throw insertError;
 
-      setInput('');
+      // Replace optimistic message with real message from server
+      if (data) {
+        setMessages((prev) => {
+          // Remove the optimistic message
+          const filtered = prev.filter((msg) => msg.id !== tempId);
+          // Add the real message (it will also come through the subscription, but this ensures it's there)
+          const realMessage: Message = {
+            id: data.id,
+            user: data.username,
+            userColor: data.building_color,
+            building: data.building_code,
+            text: data.message_text,
+            timestamp: new Date(data.created_at),
+          };
+          // Check if message already exists (from subscription)
+          const exists = filtered.some((msg) => msg.id === data.id);
+          return exists ? filtered : [...filtered, realMessage];
+        });
+      }
     } catch (err) {
       console.error('Error sending message:', err);
+      // Remove optimistic message on error
+      setMessages((prev) => prev.filter((msg) => msg.id !== tempId));
       setError('Failed to send message. Please try again.');
+      // Restore input text so user can retry
+      setInput(messageText);
     }
   };
 
@@ -321,30 +404,42 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
       {/* Chat header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-card">
         <Hash className="w-5 h-5 text-primary" />
-        <span className="font-display text-primary">GLOBAL_CHAT</span>
+        <span className="font-display text-primary">BUILDING_CHAT</span>
+        {userBuildingCode && (
+          <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+            {userBuildingCode}
+          </span>
+        )}
         <span className="text-xs text-muted-foreground ml-auto">
           {messages.length} messages
         </span>
       </div>
+      
+      {!userBuildingCode && (
+        <div className="p-4 text-center text-sm text-muted-foreground">
+          Select a building first to see chat messages.
+        </div>
+      )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
-        {loading && (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-muted-foreground">Loading messages...</p>
-          </div>
-        )}
-        {!loading && messages.length === 0 && (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-muted-foreground">No messages yet. Be the first to say something!</p>
-          </div>
-        )}
-        <AnimatePresence initial={false}>
-          {messages.map((message) => (
+      {userBuildingCode && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+          {loading && (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-muted-foreground">Loading messages...</p>
+            </div>
+          )}
+          {!loading && messages.length === 0 && (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-muted-foreground">No messages yet. Be the first to say something!</p>
+            </div>
+          )}
+          <AnimatePresence initial={false}>
+            {messages.map((message) => (
             <motion.div
               key={message.id}
               initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
+              animate={{ opacity: message.isPending ? 0.7 : 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               className="group"
             >
@@ -368,11 +463,16 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
                     <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                       {message.building}
                     </span>
+                    {message.isPending && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-500">
+                        Sending...
+                      </span>
+                    )}
                     <span className="text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
                       {formatTime(message.timestamp)}
                     </span>
                   </div>
-                  <p className="text-foreground mt-1 break-words">
+                  <p className={`text-foreground mt-1 break-words ${message.isPending ? 'opacity-70' : ''}`}>
                     {renderMessageText(message.text)}
                   </p>
                 </div>
@@ -382,9 +482,11 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
         </AnimatePresence>
         <div ref={messagesEndRef} />
       </div>
+      )}
 
       {/* Input */}
-      <div className="p-4 border-t border-border bg-card">
+      {userBuildingCode && (
+        <div className="p-4 border-t border-border bg-card">
         {/* Error message displayed below input */}
         {error && (
           <div className="mb-3 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/20">
@@ -466,6 +568,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
           </Button>
         </div>
       </div>
+      )}
     </div>
   );
 };
