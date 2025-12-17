@@ -27,7 +27,7 @@ const DailyChallenges = () => {
   const challenges: Challenge[] = [
     {
       id: "1",
-      title: "WORD CHAIN",
+      title: "CODE CHAIN",
       description:
         "Meet up in the Core and complete each other's words. Physical meetup required!",
       icon: <MessageSquare className="w-6 h-6" />,

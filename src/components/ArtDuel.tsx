@@ -268,9 +268,9 @@ const ArtDuel = () => {
         .update({ completed_at: new Date().toISOString() })
         .eq('id', sessionId);
 
-      // Track challenge completion
+      // Track challenge completion (with XP reward)
       if (user) {
-        trackChallenge(user.id, 'art-duel');
+        trackChallenge(user.id, 'art-duel', 50); // 50 XP for completing art duel
       }
 
       // Navigate to voting page (session param is optional, shows all today's drawings)

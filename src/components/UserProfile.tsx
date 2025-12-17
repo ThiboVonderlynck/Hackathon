@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { User, Trophy, Zap, Edit2, Settings, LogOut, Target, Flame } from "lucide-react";
+import { User, Trophy, Zap, Edit2, Settings, LogOut, Target, Flame, TrendingUp } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { useBadges } from '@/hooks/useBadges';
+import { useProfileStats } from '@/hooks/useProfileStats';
 import Badge from './Badge';
 
 const UserProfile = () => {
   const { profile, signOut, user, updateProfile } = useAuth();
   const { badges, loading: badgesLoading } = useBadges();
+  const { stats, loading: statsLoading } = useProfileStats();
   const [showSettings, setShowSettings] = useState(false);
   const [displayName, setDisplayName] = useState<string>("");
   const [tag, setTag] = useState<string>("");
@@ -21,15 +23,9 @@ const UserProfile = () => {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  const stats = [
-    { label: 'Points', value: '1,234', icon: <Trophy className="w-4 h-4" /> },
-    { label: 'Challenges', value: '47', icon: <Target className="w-4 h-4" /> },
-    { label: 'Streak', value: '5 days', icon: <Flame className="w-4 h-4" /> },
-  ];
-
   const recentActivity = [
     { action: 'Won Meme Battle', points: '+150', time: '2h ago' },
-    { action: 'Completed Word Chain', points: '+100', time: '5h ago' },
+    { action: 'Completed Code Chain', points: '+100', time: '5h ago' },
     { action: 'Daily Check-in', points: '+25', time: '1d ago' },
   ];
 
@@ -79,7 +75,7 @@ const UserProfile = () => {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <User className="w-12 h-12 text-primary" />
+              <User className="w-12 h-12 text-primary" />
               )}
             </div>
             <button className="absolute -bottom-2 -right-2 p-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
@@ -99,12 +95,12 @@ const UserProfile = () => {
         </p>
         <div className="flex items-center justify-center gap-2">
           {profile?.tag && (
-            <span className="px-3 py-1 rounded-full bg-building-a/20 text-building-a text-xs font-medium border border-building-a/30">
+          <span className="px-3 py-1 rounded-full bg-building-a/20 text-building-a text-xs font-medium border border-building-a/30">
               {profile.tag}
-            </span>
+          </span>
           )}
           <span className="px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs">
-            Level 12
+            Level {stats?.level || 1}
           </span>
         </div>
       </div>
@@ -112,44 +108,99 @@ const UserProfile = () => {
       {/* Stats / Badges / Activity (overview) */}
       {!showSettings && (
         <>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="grid grid-cols-3 gap-4"
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+            className="space-y-4"
           >
-            {stats.map((stat) => (
-              <div
-                key={stat.label}
-                className="p-4 rounded-lg bg-card border border-border text-center hover:border-primary/50 transition-colors"
-              >
+            {/* Level and XP Progress */}
+            {stats && (
+              <div className="p-4 rounded-lg bg-card border border-border">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-mono text-primary">LEVEL {stats.level}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {stats.xp} XP
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ 
+                      width: `${(() => {
+                        const currentLevelStartXP = stats.level === 1 ? 0 : (stats.level - 1) * (stats.level - 1) * 10;
+                        const nextLevelXP = stats.level * stats.level * 10;
+                        const progress = stats.level === 1 
+                          ? (stats.xp / 10) * 100
+                          : ((stats.xp - currentLevelStartXP) / (nextLevelXP - currentLevelStartXP)) * 100;
+                        return Math.min(100, Math.max(0, progress));
+                      })()}%` 
+                    }}
+                    transition={{ duration: 0.5 }}
+                    className="h-full bg-gradient-to-r from-primary to-accent"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {stats.xpForNextLevel} XP until level {stats.level + 1}
+                </p>
+              </div>
+            )}
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="p-4 rounded-lg bg-card border border-border text-center hover:border-primary/50 transition-colors">
                 <div className="flex items-center justify-center gap-1 text-primary mb-1">
-                  {stat.icon}
+                  <Trophy className="w-4 h-4" />
                 </div>
                 <div className="font-display text-xl text-foreground">
-                  {stat.value}
+                  {statsLoading ? '...' : stats?.totalPoints?.toLocaleString() || '0'}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {stat.label}
+                  Points
                 </div>
               </div>
-            ))}
-          </motion.div>
-
-          {/* Badges */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="space-y-3"
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-sm text-primary">BADGES</h3>
-              <span className="text-xs text-muted-foreground">
-                {badges.filter((b) => b.earned).length}/{badges.length} earned
-              </span>
+              <div className="p-4 rounded-lg bg-card border border-border text-center hover:border-primary/50 transition-colors">
+                <div className="flex items-center justify-center gap-1 text-primary mb-1">
+                  <Target className="w-4 h-4" />
+                </div>
+                <div className="font-display text-xl text-foreground">
+                  {statsLoading ? '...' : stats?.totalChallenges || 0}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Challenges
+                </div>
+              </div>
+              <div className="p-4 rounded-lg bg-card border border-border text-center hover:border-primary/50 transition-colors">
+            <div className="flex items-center justify-center gap-1 text-primary mb-1">
+                  <Flame className="w-4 h-4" />
+                </div>
+                <div className="font-display text-xl text-foreground">
+                  {statsLoading ? '...' : stats?.currentStreak || 0}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Streak
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-6 gap-2">
+      </motion.div>
+
+      {/* Badges */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="space-y-3"
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-sm text-primary">BADGES</h3>
+          <span className="text-xs text-muted-foreground">
+                {badges.filter((b) => b.earned).length}/{badges.length} earned
+          </span>
+        </div>
+        <div className="grid grid-cols-6 gap-2">
               {badgesLoading ? (
                 <div className="col-span-6 text-center text-muted-foreground text-sm py-4">
                   Loading badges...
@@ -159,30 +210,30 @@ const UserProfile = () => {
                   <Badge key={badge.id} badge={badge} />
                 ))
               )}
-            </div>
-          </motion.div>
+        </div>
+      </motion.div>
 
-          {/* Recent Activity */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="space-y-3"
-          >
+      {/* Recent Activity */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className="space-y-3"
+      >
             <h3 className="font-display text-sm text-primary">
               RECENT_ACTIVITY
             </h3>
-            <div className="space-y-2">
-              {recentActivity.map((activity, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between p-3 rounded-lg bg-card border border-border"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
-                      <Zap className="w-4 h-4 text-primary" />
-                    </div>
-                    <div>
+        <div className="space-y-2">
+          {recentActivity.map((activity, index) => (
+            <div
+              key={index}
+              className="flex items-center justify-between p-3 rounded-lg bg-card border border-border"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
+                  <Zap className="w-4 h-4 text-primary" />
+                </div>
+                <div>
                       <p className="text-sm text-foreground">
                         {activity.action}
                       </p>
@@ -295,7 +346,7 @@ const UserProfile = () => {
                     onCheckedChange={(v) => setPublicProfile(!!v)}
                   />
                 </div>
-              </div>
+            </div>
 
               {saveMessage && (
                 <p className="text-xs text-muted-foreground">{saveMessage}</p>
@@ -305,10 +356,10 @@ const UserProfile = () => {
                 <Button type="submit" variant="neon" disabled={saving}>
                   {saving ? "Saving..." : "Save changes"}
                 </Button>
-              </div>
+        </div>
             </form>
           </Card>
-        </motion.div>
+      </motion.div>
       )}
 
       {/* Actions */}

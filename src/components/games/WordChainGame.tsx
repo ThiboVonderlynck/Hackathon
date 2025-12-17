@@ -1,293 +1,392 @@
 "use client";
 
-import { useState, useMemo, useCallback, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { RefreshCw } from "lucide-react";
-import { englishWords } from "@/data/englishWords";
+import { Copy, Check, Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 
-type WordEntry = {
-  word: string;
-  valid: boolean;
-  reason?: string;
-};
-
-const MIN_LENGTH = 3;
-
-const ENGLISH_WORD_SET = new Set(englishWords.map((w) => w.toLowerCase()));
-
-const WordChainGame = () => {
-  const [chain, setChain] = useState<WordEntry[]>([]);
-  const [input, setInput] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
+const CodeChainGame = () => {
+  const { user } = useAuth();
+  const [myCode, setMyCode] = useState<string | null>(null);
+  const [inputCode, setInputCode] = useState("");
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [nextWord, setNextWord] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [claimedCodes, setClaimedCodes] = useState<string[]>([]);
+  const [myCodeClaimed, setMyCodeClaimed] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
-  const score = useMemo(() => chain.filter((w) => w.valid).length, [chain]);
+  // Load user's code for today
+  useEffect(() => {
+    const loadCode = async () => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
 
-  const resetGame = useCallback(() => {
-    setChain([]);
-    setInput("");
-    setMessage("New round started. Show the secret word to the next player.");
-    setError(null);
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: existingCode, error: fetchError } = await supabase
+          .from('word_chain_codes')
+          .select('code, id')
+          .eq('user_id', user.id)
+          .eq('date', today)
+          .single();
 
-    // First suggestion can be any random word from the list
-    if (englishWords.length > 0) {
-      const random =
-        englishWords[Math.floor(Math.random() * englishWords.length)];
-      setNextWord(random.toLowerCase());
-    } else {
-      setNextWord(null);
+        if (existingCode && !fetchError) {
+          setMyCode(existingCode.code);
+          
+          // Check if code has been claimed
+          const { data: claimData } = await supabase
+            .from('word_chain_claims')
+            .select('id')
+            .eq('code_id', existingCode.id)
+            .single();
+          
+          if (claimData) {
+            setMyCodeClaimed(true);
+          }
+        }
+
+        // Load claimed codes by current user
+        const { data: claims } = await supabase
+          .from('word_chain_claims')
+          .select('word_chain_codes!inner(code)')
+          .eq('claimer_id', user.id)
+          .eq('word_chain_codes.date', today);
+
+        if (claims) {
+          const codes = claims.map((c: any) => c.word_chain_codes.code);
+          setClaimedCodes(codes);
+        }
+
+        setLoading(false);
+      } catch (err) {
+        console.error('Error loading code:', err);
+        setLoading(false);
+      }
+    };
+
+    loadCode();
+  }, [user]);
+
+  // Generate unique 32-character code using Math.random()
+  const generateCode = (): string => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code = '';
+    for (let i = 0; i < 32; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-  }, []);
+    return code;
+  };
 
-  const pickNextWord = useCallback(() => {
-    const used = new Set(chain.map((e) => e.word.toLowerCase()));
-
-    // Prefer words that haven't been used yet in the current chain
-    const candidates = englishWords.filter((w) => {
-      const lw = w.toLowerCase();
-      return lw.length >= MIN_LENGTH && !used.has(lw);
-    });
-
-    const pool =
-      candidates.length > 0
-        ? candidates
-        : englishWords.filter((w) => w.length >= MIN_LENGTH);
-
-    if (pool.length === 0) {
-      setNextWord(null);
+  const handleGenerateCode = async () => {
+    if (!user) {
+      setError("Please log in to generate a code");
       return;
     }
 
-    const random = pool[Math.floor(Math.random() * pool.length)];
-    setNextWord(random.toLowerCase());
-  }, [chain]);
-
-  const validateWord = (word: string): { ok: boolean; reason?: string } => {
-    const cleaned = word.trim().toLowerCase();
-
-    if (!nextWord) {
-      return {
-        ok: false,
-        reason:
-          "There is no active secret word. Press Reset chain on the display device first.",
-      };
-    }
-
-    if (!cleaned) {
-      return { ok: false, reason: "Type a word first." };
-    }
-
-    if (!/^[a-zA-ZÀ-ÿ]+$/.test(cleaned)) {
-      return {
-        ok: false,
-        reason: "Only letters are allowed. No numbers or symbols.",
-      };
-    }
-
-    if (chain.some((entry) => entry.word.toLowerCase() === cleaned)) {
-      return {
-        ok: false,
-        reason: "This word is already used in the chain.",
-      };
-    }
-
-    // The guess must exactly match the current secret word.
-    if (cleaned !== nextWord.toLowerCase()) {
-      return {
-        ok: false,
-        reason: "That is not the secret word that was shown.",
-      };
-    }
-
-    // Real-word check against curated English list to prevent random spam.
-    const isInList = ENGLISH_WORD_SET.has(cleaned);
-    if (!isInList) {
-      return {
-        ok: false,
-        reason: "This word is not part of the game. Try another English word.",
-      };
-    }
-
-    if (cleaned.length < MIN_LENGTH) {
-      return {
-        ok: false,
-        reason: `Word must be at least ${MIN_LENGTH} letters long.`,
-      };
-    }
-
-    return { ok: true };
-  };
-
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    setMessage(null);
+    setGenerating(true);
     setError(null);
+    setSuccess(null);
 
-    const word = input.trim();
-    const validation = validateWord(word);
+    try {
+      // Generate code in frontend with Math.random()
+      let codeToUse = generateCode();
+      
+      // Check if code already exists, regenerate if needed (max 10 attempts)
+      let attempts = 0;
+      while (attempts < 10) {
+        const { data: existing } = await supabase
+          .from('word_chain_codes')
+          .select('code')
+          .eq('code', codeToUse)
+          .single();
+        
+        if (!existing) {
+          break; // Code is unique
+        }
+        codeToUse = generateCode(); // Regenerate
+        attempts++;
+      }
 
-    if (!validation.ok) {
-      // Invalid word: show error and reset the chain (round is lost)
-      setError(validation.reason ?? "Invalid word.");
-      setChain([]);
-      // Keep current suggestion; players can try again with the same word
-    } else {
-      setChain((prev) => [...prev, { word, valid: true }]);
-      setMessage(
-        "Nice! Group score increased. Pass the device to another player."
-      );
-      // Generate next random secret word suggestion for the following player
-      pickNextWord();
+      // Insert code into database (no word needed)
+      const { error: insertError } = await supabase
+        .from('word_chain_codes')
+        .upsert({
+          user_id: user.id,
+          code: codeToUse,
+          word: '', // Empty word, not needed anymore
+          date: new Date().toISOString().split('T')[0],
+        }, {
+          onConflict: 'user_id,date',
+        });
+
+      if (insertError) throw insertError;
+
+      setMyCode(codeToUse);
+      setSuccess("Your code has been generated! Share it with others (not in chat!).");
+    } catch (err: any) {
+      console.error('Error generating code:', err);
+      setError(err.message || "Failed to generate code. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleClaimCode = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!user || !inputCode.trim()) {
+      setError("Please enter a code");
+      return;
     }
 
-    setInput("");
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Claim the code using database function
+      const { data: claimed, error: claimError } = await supabase.rpc('claim_word_chain_code', {
+        code_to_claim: inputCode.trim().toUpperCase(),
+        claimer_uuid: user.id
+      });
+
+      if (claimError) throw claimError;
+
+      if (!claimed) {
+        setError("Invalid code, code already claimed, or you're trying to claim your own code.");
+        return;
+      }
+
+      setSuccess("Success! You claimed the code. You both earned 10 XP!");
+      setInputCode("");
+      
+      // Reload claimed codes
+      const { data: claims } = await supabase
+        .from('word_chain_claims')
+        .select('word_chain_codes!inner(code)')
+        .eq('claimer_id', user.id)
+        .eq('word_chain_codes.date', new Date().toISOString().split('T')[0]);
+
+      if (claims) {
+        const codes = claims.map((c: any) => c.word_chain_codes.code);
+        setClaimedCodes(codes);
+      }
+      
+      // Check if user's own code was claimed (refresh status)
+      if (myCode) {
+        const { data: codeRecord } = await supabase
+          .from('word_chain_codes')
+          .select('id')
+          .eq('code', myCode)
+          .eq('date', new Date().toISOString().split('T')[0])
+          .single();
+        
+        if (codeRecord) {
+          const { data: claimData } = await supabase
+            .from('word_chain_claims')
+            .select('id')
+            .eq('code_id', codeRecord.id)
+            .single();
+          
+          if (claimData) {
+            setMyCodeClaimed(true);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('Error claiming code:', err);
+      setError(err.message || "Failed to claim code. Please try again.");
+    }
   };
+
+  const copyCode = async () => {
+    if (!myCode) return;
+    
+    try {
+      await navigator.clipboard.writeText(myCode);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  // Handle code input (only alphanumeric)
+  const handleCodeInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.toUpperCase();
+    // Only allow alphanumeric characters
+    const filtered = value.replace(/[^A-Z0-9]/g, '');
+    setInputCode(filtered);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Titel + uitleg */}
+      {/* Title + explanation */}
       <div className="space-y-2 text-center md:text-left">
-        <h2 className="font-display text-2xl text-primary">WORD_CHAIN.GAME</h2>
+        <h2 className="font-display text-2xl text-primary">CODE_CHAIN</h2>
         <p className="text-sm text-muted-foreground max-w-xl space-y-1">
           <span className="block">
-            Play this{" "}
-            <span className="font-semibold">only with someone next to you</span>
-            . Put both devices side by side.
+            Generate a unique code. Share your code (not in chat!) with others.
           </span>
           <span className="block">
-            On this screen a secret word appears. Another player must type{" "}
-            <span className="font-semibold">exactly that word</span> on their
-            own device. Every correct guess increases the{" "}
-            <span className="font-semibold">group score by 1</span>.
+            When someone enters your code, you both earn 10 XP!
+          </span>
+          <span className="block text-destructive/80">
+            ⚠️ Sharing codes in chat is forbidden!
           </span>
         </p>
       </div>
 
-      {/* Secret word for the next player (this device is the "display" screen) */}
+      {/* My Code Section */}
       <Card className="p-4 border-border bg-card/80 backdrop-blur-sm">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-[0.2em]">
-              WORD_FOR_NEXT_PLAYER
-            </p>
-            {nextWord ? (
-              <p className="mt-1 text-2xl font-mono font-semibold text-primary">
-                {nextWord.toUpperCase()}
+        <h3 className="text-xs text-muted-foreground uppercase tracking-[0.2em] mb-3">
+          YOUR CODE FOR TODAY
+        </h3>
+        
+        {myCode ? (
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Your unique code:</p>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 font-mono font-bold text-primary bg-muted px-3 py-2 rounded border border-primary/30 text-lg tracking-wider select-all break-all">
+                  {myCode}
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={copyCode}
+                  className="shrink-0"
+                >
+                  {codeCopied ? (
+                    <>
+                      <Check className="w-4 h-4 mr-1" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 mr-1" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                ⚠️ You can see this code, but you cannot type it in chat! Share it in person only.
               </p>
-            ) : (
-              <p className="mt-1 text-sm text-muted-foreground">
-                Press LOCK IN with a correct word to generate the next secret
-                word for another player.
-              </p>
+            </div>
+
+            {myCodeClaimed && (
+              <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/30 rounded text-green-500 text-sm">
+                <Check className="w-4 h-4" />
+                <span>Your code has been claimed! You earned 10 XP.</span>
+              </div>
             )}
           </div>
-        </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Generate a unique code for today.
+            </p>
+            <Button
+              onClick={handleGenerateCode}
+              variant="neon"
+              className="w-full"
+              disabled={generating}
+            >
+              {generating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Generate Your Code
+                </>
+              )}
+            </Button>
+          </div>
+        )}
       </Card>
 
-      {/* Score + reset */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-baseline gap-2">
-          <span className="text-sm text-muted-foreground">Score</span>
-          <span className="font-display text-3xl text-primary">{score}</span>
-          <span className="text-xs text-muted-foreground">
-            valid words in this chain
-          </span>
-        </div>
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={resetGame}
-          className="flex items-center gap-2"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Reset chain
-        </Button>
-      </div>
-
-      {/* Input */}
+      {/* Claim Code Section */}
       <Card className="p-4 border-border bg-card/80 backdrop-blur-sm">
-        <form
-          onSubmit={handleSubmit}
-          className="flex flex-col md:flex-row gap-3 items-stretch md:items-center"
-        >
-          <div className="flex-1 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground uppercase tracking-[0.2em]">
-                ENTER_WORD
-              </span>
-            </div>
+        <h3 className="text-xs text-muted-foreground uppercase tracking-[0.2em] mb-3">
+          CLAIM SOMEONE'S CODE
+        </h3>
+        
+        <form onSubmit={handleClaimCode} className="space-y-3">
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">
+              Enter the code:
+            </label>
             <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Type the secret word you see on another screen"
+              value={inputCode}
+              onChange={handleCodeInputChange}
+              placeholder="ABCD1234..."
               className="font-mono"
+              maxLength={32}
             />
           </div>
 
-          <Button type="submit" variant="neon" className="w-full md:w-auto">
-            LOCK IN
+          <Button type="submit" variant="neon" className="w-full" disabled={!inputCode.trim()}>
+            Claim Code
           </Button>
         </form>
 
         {/* Feedback */}
-        <div className="mt-3 min-h-[1.5rem] text-sm">
-          {error && <p className="text-destructive">{error}</p>}
-          {!error && message && <p className="text-green-500">{message}</p>}
-          {!error && !message && chain.length === 0 && (
-            <p className="text-muted-foreground">
-              Start the chain with the first word, then let another player type
-              the next one on their own device.
-            </p>
+        <div className="mt-3 min-h-[1.5rem]">
+          {error && (
+            <div className="flex items-center gap-2 text-destructive text-sm">
+              <AlertCircle className="w-4 h-4" />
+              <span>{error}</span>
+            </div>
+          )}
+          {success && (
+            <div className="flex items-center gap-2 text-green-500 text-sm">
+              <Check className="w-4 h-4" />
+              <span>{success}</span>
+            </div>
           )}
         </div>
       </Card>
 
-      {/* Chain overzicht */}
-      <div className="space-y-3">
-        <h3 className="text-xs text-muted-foreground uppercase tracking-[0.2em]">
-          CURRENT_CHAIN
-        </h3>
-
-        {chain.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No words played yet. Time to make the first move…
-          </p>
-        ) : (
+      {/* Claimed Codes */}
+      {claimedCodes.length > 0 && (
+        <Card className="p-4 border-border bg-card/80 backdrop-blur-sm">
+          <h3 className="text-xs text-muted-foreground uppercase tracking-[0.2em] mb-3">
+            CODES YOU CLAIMED TODAY
+          </h3>
           <div className="flex flex-wrap gap-2">
-            {chain.map((entry, index) => (
+            {claimedCodes.map((code, index) => (
               <motion.div
-                key={`${entry.word}-${index}`}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`
-                  px-3 py-1 rounded-full text-sm font-mono
-                  border
-                  ${
-                    entry.valid
-                      ? "border-building-b bg-building-b/10 text-building-b"
-                      : "border-destructive bg-destructive/10 text-destructive"
-                  }
-                `}
+                key={index}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="px-3 py-1 rounded-full text-sm font-mono border border-primary/30 bg-primary/10 text-primary"
               >
-                <span>{index + 1}.</span>{" "}
-                <span className="uppercase">{entry.word}</span>
-                {!entry.valid && entry.reason && (
-                  <span className="ml-2 text-[0.7rem] opacity-80">
-                    ({entry.reason})
-                  </span>
-                )}
+                {code}
               </motion.div>
             ))}
           </div>
-        )}
-      </div>
+        </Card>
+      )}
     </div>
   );
 };
 
-export default WordChainGame;
+export default CodeChainGame;

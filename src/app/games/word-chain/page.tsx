@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import MatrixRain from "@/components/MatrixRain";
-import WordChainGame from "@/components/games/WordChainGame";
+import CodeChainGame from "@/components/games/WordChainGame";
 import { Button } from "@/components/ui/button";
 
 export default function WordChainPage() {
@@ -29,7 +29,7 @@ export default function WordChainPage() {
             </Button>
             <div className="space-y-1">
               <h1 className="font-display text-xl text-primary">
-                WORD_CHAIN
+                CODE_CHAIN
               </h1>
               <p className="text-xs text-muted-foreground uppercase tracking-[0.25em]">
                 DAILY_CHALLENGE / GAMES
@@ -39,7 +39,7 @@ export default function WordChainPage() {
 
           {/* Game */}
           <div className="p-4 md:p-6 rounded-xl bg-card/90 border border-border backdrop-blur">
-            <WordChainGame />
+            <CodeChainGame />
           </div>
         </div>
       </main>
