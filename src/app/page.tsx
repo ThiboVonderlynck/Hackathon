@@ -49,8 +49,38 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [isDetecting, setIsDetecting] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
-  const [buildings, setBuildings] = useState(mapCampusesToBuildings());
+  const [buildings, setBuildings] = useState(() => {
+    // Initialize with fixed values to prevent hydration mismatch
+    // Will be updated on client mount
+    return howestCampuses.map((campus, index) => {
+      const code = campus.name
+        .replace('Campus Kortrijk ', '')
+        .replace('Campus ', '')
+        .split(' ')
+        .map(word => word.substring(0, 3).toUpperCase())
+        .join('')
+        .substring(0, 8);
+      
+      return {
+        id: campus.id,
+        name: campus.name.replace('Campus Kortrijk ', '').replace('Campus ', ''),
+        code: code,
+        color: colorMap[index % colorMap.length] as 'green' | 'cyan' | 'magenta' | 'yellow',
+        activeUsers: 0, // Will be set on client
+        points: 0, // Will be set on client
+        isNear: false,
+        campus: campus,
+      };
+    });
+  });
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Initialize random values only on client to prevent hydration mismatch
+  useEffect(() => {
+    setIsMounted(true);
+    setBuildings(mapCampusesToBuildings());
+  }, []);
 
   const currentBuilding = buildings.find(b => b.id === selectedBuilding);
   const onlineCount = buildings.reduce((acc, b) => acc + b.activeUsers, 0);
