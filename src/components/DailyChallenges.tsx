@@ -1,0 +1,287 @@
+import { motion } from "framer-motion";
+import {
+  Palette,
+  MessageSquare,
+  Image,
+  Zap,
+  Clock,
+  Users,
+  ChevronRight,
+  QrCode,
+} from "lucide-react";
+import { Button } from "./ui/button";
+import { useRouter } from "next/navigation";
+import { useUsers } from "@/contexts/UserContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
+import { useEffect, useState } from "react";
+interface Challenge {
+  id: string;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  participants: number;
+  timeLeft: string;
+  points: number;
+  type: "active" | "upcoming" | "completed";
+  color: string;
+}
+
+const DailyChallenges = () => {
+  const router = useRouter();
+  const { connectedUsers } = useUsers();
+  const { user } = useAuth();
+  const [hasBuilding, setHasBuilding] = useState(false);
+  const [checkingBuilding, setCheckingBuilding] = useState(true);
+  
+  // Check if user has a building (from database session)
+  useEffect(() => {
+    const checkBuilding = async () => {
+      if (!user) {
+        setHasBuilding(false);
+        setCheckingBuilding(false);
+        return;
+      }
+
+      try {
+        const { data: buildingId, error } = await supabase.rpc('get_user_building_today', {
+          user_uuid: user.id
+        });
+
+        if (error) {
+          console.error('Error checking building:', error);
+          setHasBuilding(false);
+        } else {
+          setHasBuilding(!!buildingId);
+        }
+      } catch (err) {
+        console.error('Error checking building:', err);
+        setHasBuilding(false);
+      } finally {
+        setCheckingBuilding(false);
+      }
+    };
+
+    checkBuilding();
+  }, [user]);
+  const challenges: Challenge[] = [
+    {
+      id: "1",
+      title: "CODE CHAIN",
+      description:
+        "Meet up in the Core and complete each other's words. Physical meetup required!",
+      icon: <MessageSquare className="w-6 h-6" />,
+      participants: 24,
+      timeLeft: "2h 34m",
+      points: 150,
+      type: "active",
+      color: "green",
+    },
+    {
+      id: "2",
+      title: "MEME BATTLE",
+      description: "Create the best meme of the day. All buildings vote!",
+      icon: <Image className="w-6 h-6" />,
+      participants: 67,
+      timeLeft: "5h 12m",
+      points: 200,
+      type: "active",
+      color: "cyan",
+    },
+    {
+      id: "3",
+      title: "ART DUEL",
+      description:
+        "Create a drawing and let the buildings vote for the best one.",
+      icon: <Palette className="w-6 h-6" />,
+      participants: 45,
+      timeLeft: "1h 45m",
+      points: 175,
+      type: "active",
+      color: "magenta",
+    },
+    {
+      id: "4",
+      title: "SPEED QUIZ",
+      description: "Answer 10 nerd trivia questions as fast as possible.",
+      icon: <Zap className="w-6 h-6" />,
+      participants: 0,
+      timeLeft: "Starts in 30m",
+      points: 100,
+      type: "upcoming",
+      color: "yellow",
+    },
+    {
+      id: "5",
+      title: "QR CODE HUNT",
+      description: "Find someone on campus with a matching QR code. Scan and match to earn points!",
+      icon: <QrCode className="w-6 h-6" />,
+      participants: 32,
+      timeLeft: "3h 15m",
+      points: 125,
+      type: "active",
+      color: "green",
+    },
+  ];
+
+  const colorMap: Record<
+    string,
+    { border: string; bg: string; text: string; shadow: string }
+  > = {
+    green: {
+      border: "border-building-a",
+      bg: "bg-building-a/10",
+      text: "text-building-a",
+      shadow: "shadow-[0_0_15px_hsl(var(--building-a)/0.3)]",
+    },
+    cyan: {
+      border: "border-building-b",
+      bg: "bg-building-b/10",
+      text: "text-building-b",
+      shadow: "shadow-[0_0_15px_hsl(var(--building-b)/0.3)]",
+    },
+    magenta: {
+      border: "border-building-c",
+      bg: "bg-building-c/10",
+      text: "text-building-c",
+      shadow: "shadow-[0_0_15px_hsl(var(--building-c)/0.3)]",
+    },
+    yellow: {
+      border: "border-building-d",
+      bg: "bg-building-d/10",
+      text: "text-building-d",
+      shadow: "shadow-[0_0_15px_hsl(var(--building-d)/0.3)]",
+    },
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="font-display text-xl text-primary">DAILY_CHALLENGES</h2>
+        <span className="text-xs text-muted-foreground">Reset in 8h 24m</span>
+      </div>
+      
+      {!hasBuilding && (
+        <div className="p-4 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive text-sm">
+          ⚠️ You must select a building first before you can play games. Go to Home and detect your location.
+        </div>
+      )}
+
+      <div className="grid gap-4">
+        {challenges.map((challenge, index) => {
+          const colors = colorMap[challenge.color];
+          const isActive = challenge.type === "active";
+
+          return (
+            <motion.div
+              key={challenge.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 }}
+              className={`
+                relative p-4 rounded-lg border-2 transition-all duration-300
+                ${hasBuilding ? "cursor-pointer hover:scale-[1.02]" : "cursor-not-allowed opacity-50"}
+                ${colors.border} ${colors.bg}
+                ${isActive ? colors.shadow : "opacity-70"}
+                group
+              `}
+              onClick={() => {
+                if (!hasBuilding) {
+                  return;
+                }
+                if (challenge.id === "1") {
+                  router.push("/games/word-chain");
+                  return;
+                }
+                if (challenge.id === "2") {
+                  router.push("/games/meme-battle");
+                  return;
+                }
+                if (challenge.id === "3") {
+                  router.push("/games/art-duel");
+                  return;
+                }
+                if (challenge.id === "4") {
+                  router.push("/games/speed-quiz");
+                  return;
+                }
+                if (challenge.id === "5") {
+                  router.push("/games/qr-hunt");
+                  return;
+                }
+              }}
+            >
+              {isActive && (
+                <span className="absolute -top-2 left-4 px-2 py-0.5 text-xs bg-destructive text-destructive-foreground rounded font-bold">
+                  LIVE
+                </span>
+              )}
+
+              <div className="flex items-start gap-4">
+                {/* Icon */}
+                <div className={`p-3 rounded-lg ${colors.bg} ${colors.text}`}>
+                  {challenge.icon}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className={`font-display text-lg ${colors.text}`}>
+                      {challenge.title}
+                    </h3>
+                    <span className="px-2 py-0.5 text-xs bg-muted text-muted-foreground rounded">
+                      +{challenge.points} pts
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
+                    {challenge.description}
+                  </p>
+
+                  <div className="flex items-center gap-4 text-sm">
+                    <div className="flex items-center gap-1 text-muted-foreground">
+                      <Users className="w-4 h-4" />
+                      <span>{challenge.participants}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-muted-foreground">
+                      <Clock className="w-4 h-4" />
+                      <span>{challenge.timeLeft}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`shrink-0 ${colors.text} opacity-0 group-hover:opacity-100 transition-opacity`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!hasBuilding) {
+                      return;
+                    }
+                    if (challenge.id === "1") {
+                      router.push("/games/word-chain");
+                      return;
+                    }
+                    if (challenge.id === "2") {
+                      router.push("/games/meme-battle");
+                      return;
+                    }
+                    if (challenge.id === "5") {
+                      router.push("/games/qr-hunt");
+                      return;
+                    }
+                  }}
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </Button>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export default DailyChallenges;

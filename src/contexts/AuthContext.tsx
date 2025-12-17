@@ -1,0 +1,353 @@
+'use client';
+
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { supabase } from '@/lib/supabase';
+import { User } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+// Dev helper: set to true to bypass real Supabase auth and use a mock user
+// For real Supabase login, keep this FALSE.
+const AUTH_DISABLED = false;
+const MOCK_USER_ID = 'dev-user-id';
+const MOCK_USER = {
+  id: MOCK_USER_ID,
+  email: 'dev@example.com',
+} as User;
+
+interface Profile {
+  id: string;
+  user_id: string;
+  username: string;
+  avatar_url: string | null;
+  tag: string;
+  created_at: string;
+}
+
+interface AuthContextType {
+  user: User | null;
+  profile: Profile | null;
+  loading: boolean;
+  profileLoading: boolean;
+  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string) => Promise<{ error: any; requiresEmailConfirmation?: boolean; message?: string }>;
+  signOut: () => Promise<void>;
+  updateProfile: (data: { username?: string; avatar_url?: string; tag?: string }) => Promise<{ error: any }>;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  const MOCK_PROFILE: Profile = {
+    id: MOCK_USER_ID,
+    user_id: MOCK_USER_ID,
+    username: 'Dev User',
+    avatar_url: null,
+    tag: 'DEV#0001',
+    created_at: new Date().toISOString(),
+  };
+
+  const loadProfile = async (userId: string) => {
+    setProfileLoading(true);
+    try {
+      // Check if Supabase is properly configured
+      if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
+        console.warn('Supabase not configured, skipping profile load');
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
+
+      // Query with explicit timeout handling
+      const queryPromise = supabase
+        .from('profiles')
+        .select('id, user_id, username, avatar_url, tag, created_at')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      // Add a timeout wrapper (shorter timeout since this is non-blocking)
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Query timeout')), 5000);
+      });
+
+      const result = await Promise.race([queryPromise, timeoutPromise]) as any;
+      const { data, error } = result || {};
+
+      // Check for rocket badge and update streak (only on login)
+      try {
+        // Check if this is first login (for rocket badge and XP)
+        const { data: existingBadge } = await supabase
+          .from('user_badges')
+          .select('badge_id')
+          .eq('user_id', userId)
+          .eq('badge_id', 'rocket')
+          .single();
+        
+        const isFirstLogin = !existingBadge;
+        
+        if (isFirstLogin) {
+          // First login: give rocket badge and 10 XP
+          await supabase.rpc('check_rocket_badge', { user_uuid: userId });
+          await supabase.rpc('add_xp', { 
+            user_uuid: userId, 
+            xp_amount: 10,
+            activity_type: 'first-login'
+          });
+        }
+        
+        // Always update streak on login (streak is always at least 1 when logged in)
+        await supabase.rpc('update_streak', { user_uuid: userId });
+      } catch (badgeError) {
+        // Ignore badge errors (table might not exist yet)
+        console.warn('Could not check rocket badge:', badgeError);
+      }
+
+      if (error) {
+        // PGRST116 = no rows returned (profile doesn't exist yet) - this is normal
+        // PGRST202 = function/table not found - table might not exist yet
+        // PGRST301 = permission denied - RLS policy issue
+        if (error.code === 'PGRST116') {
+          // This is normal - profile doesn't exist yet
+          setProfile(null);
+        } else if (error.code === 'PGRST202') {
+          console.warn('Profiles table might not exist yet. Please run the migration SQL.');
+          setProfile(null);
+        } else if (error.code === 'PGRST301') {
+          console.warn('Permission denied. Check RLS policies on profiles table.');
+          setProfile(null);
+        } else {
+          console.error('Error loading profile:', error.code, error.message);
+          setProfile(null);
+        }
+      } else {
+        setProfile(data || null);
+      }
+    } catch (error: any) {
+      if (error.message?.includes('timeout')) {
+        // Silently fail - profile load shouldn't block the app
+        console.warn('Profile query timed out. User can still use the app, but profile features may be limited.');
+        setProfile(null);
+      } else {
+        console.error('Error loading profile:', error);
+        setProfile(null);
+      }
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  // Load user and profile on mount
+  useEffect(() => {
+    // In dev mode: skip Supabase completely and use a fake user
+    if (AUTH_DISABLED) {
+      setUser(MOCK_USER);
+      setProfile(MOCK_PROFILE);
+      setLoading(false);
+      setProfileLoading(false);
+      return;
+    }
+
+    let mounted = true;
+
+    // Get initial session - this is the primary auth check
+    const initAuth = async () => {
+      try {
+        // First, check if user is authenticated (this is fast)
+        const { data: { session }, error } = await supabase.auth.getSession();
+
+        if (!mounted) return;
+
+        if (error) {
+          console.error('Error getting session:', error);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+
+        // Set user immediately - don't wait for profile
+        setUser(session?.user ?? null);
+        
+        // Always set loading to false after auth check, even if profile fails
+        setLoading(false);
+
+        // Load profile and wait for it to complete before showing UI
+        if (session?.user) {
+          await loadProfile(session.user.id).catch(err => {
+            console.error('Profile load failed:', err);
+            setProfileLoading(false);
+          });
+        } else {
+          setProfile(null);
+          setProfileLoading(false);
+        }
+      } catch (error: any) {
+        console.error('Error initializing auth:', error);
+        if (mounted) {
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+        }
+      }
+    };
+
+    initAuth();
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+      
+      // Update user immediately
+      setUser(session?.user ?? null);
+      setLoading(false);
+      
+      // Load profile in background
+      if (session?.user) {
+        loadProfile(session.user.id).catch(err => {
+          console.error('Background profile load failed:', err);
+          setProfileLoading(false);
+        });
+      } else {
+        setProfile(null);
+        setProfileLoading(false);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    if (AUTH_DISABLED) {
+      // Pretend login worked and keep using the mock user
+      setUser(MOCK_USER);
+      setProfile(MOCK_PROFILE);
+      return { error: null };
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    return { error };
+  };
+
+  const signUp = async (email: string, password: string) => {
+    if (AUTH_DISABLED) {
+      // Skip real sign-up in dev mode
+      setUser(MOCK_USER);
+      setProfile(MOCK_PROFILE);
+      return {
+        error: null,
+        requiresEmailConfirmation: false,
+        message: 'Auth disabled in dev mode – using mock user.',
+      };
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+      },
+    });
+    
+    if (error) {
+      return { error };
+    }
+    
+    // If we get a session, email confirmation is disabled - user is automatically logged in
+    if (data.session) {
+      // User is automatically logged in (email confirmation disabled)
+      return { 
+        error: null,
+        requiresEmailConfirmation: false,
+        message: 'Account created successfully!'
+      };
+    }
+    
+    // If we get a user but no session, email confirmation is required
+    if (data.user && !data.session) {
+      return { 
+        error: null,
+        requiresEmailConfirmation: true,
+        message: 'Please check your email to confirm your account. If you don\'t see it, check your spam folder.'
+      };
+    }
+    
+    return { error: null };
+  };
+
+  const signOut = async () => {
+    if (AUTH_DISABLED) {
+      // In dev mode you can choose to keep the mock user "logged in"
+      // or clear it. Here we keep it so the app stays accessible.
+      setUser(MOCK_USER);
+      setProfile(MOCK_PROFILE);
+      return;
+    }
+
+    await supabase.auth.signOut();
+    setUser(null);
+    setProfile(null);
+  };
+
+  const updateProfile = async (data: { username?: string; avatar_url?: string; tag?: string }) => {
+    if (!user) return { error: { message: 'No user logged in' } };
+
+    const { error } = await supabase
+      .from('profiles')
+      .upsert(
+        {
+          user_id: user.id,
+          ...data,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: 'user_id',
+        }
+      );
+
+    if (!error) {
+      await loadProfile(user.id);
+    }
+
+    return { error };
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        profile,
+        loading,
+        profileLoading,
+        signIn,
+        signUp,
+        signOut,
+        updateProfile,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+}
+

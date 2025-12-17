@@ -1,65 +1,625 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { MapPin, Loader2 } from 'lucide-react';
+import MatrixRain from '@/components/MatrixRain';
+import TerminalHeader from '@/components/TerminalHeader';
+import BuildingSelector from '@/components/BuildingSelector';
+import GlobalChat from '@/components/GlobalChat';
+import DailyChallenges from '@/components/DailyChallenges';
+import Leaderboard from '@/components/Leaderboard';
+import Navigation from '@/components/Navigation';
+import UserProfile from '@/components/UserProfile';
+import LoginScreen from '@/components/LoginScreen';
+import ProfileSetup from '@/components/ProfileSetup';
+import { Button } from '@/components/ui/button';
+import { howestCampuses, isOnCampus } from '@/data/howestCampuses';
+import { useUsers } from '@/contexts/UserContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+
+type Tab = 'home' | 'chat' | 'challenges' | 'leaderboard' | 'profile';
+
+// Assign colors to campuses
+const colorMap = ['green', 'cyan', 'magenta', 'yellow', 'green', 'cyan', 'magenta', 'yellow'];
+
+// Map campuses to buildings format
+const mapCampusesToBuildings = () => {
+  return howestCampuses.map((campus, index) => {
+    // Generate a short code from the campus name
+    const code = campus.name
+      .replace('Campus Kortrijk ', '')
+      .replace('Campus ', '')
+      .split(' ')
+      .map(word => word.substring(0, 3).toUpperCase())
+      .join('')
+      .substring(0, 8);
+    
+    return {
+      id: campus.id,
+      name: campus.name.replace('Campus Kortrijk ', '').replace('Campus ', ''),
+      code: code,
+      color: colorMap[index % colorMap.length] as 'green' | 'cyan' | 'magenta' | 'yellow',
+      activeUsers: Math.floor(Math.random() * 50) + 10, // Random for demo
+      points: Math.floor(Math.random() * 2000) + 1000, // Random for demo
+      isNear: false,
+      campus: campus, // Store the original campus data
+    };
+  });
+};
 
 export default function Home() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+  const { addUser, getUserCountForBuilding, totalConnectedUsers, connectedUsers } = useUsers();
+  const { user, profile, loading: authLoading, profileLoading } = useAuth();
+  const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>('home');
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(true);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [hasLocationPermission, setHasLocationPermission] = useState(false);
+  const [profileSetupComplete, setProfileSetupComplete] = useState(false);
+  const [buildingLoading, setBuildingLoading] = useState(true);
+  const [buildings, setBuildings] = useState(() => {
+    // Initialize with fixed values to prevent hydration mismatch
+    // Will be updated on client mount
+    return howestCampuses.map((campus, index) => {
+      const code = campus.name
+        .replace('Campus Kortrijk ', '')
+        .replace('Campus ', '')
+        .split(' ')
+        .map(word => word.substring(0, 3).toUpperCase())
+        .join('')
+        .substring(0, 8);
+      
+      return {
+        id: campus.id,
+        name: campus.name.replace('Campus Kortrijk ', '').replace('Campus ', ''),
+        code: code,
+        color: colorMap[index % colorMap.length] as 'green' | 'cyan' | 'magenta' | 'yellow',
+        activeUsers: 0, // Will be set on client
+        points: 0, // Will be set on client
+        isNear: false,
+        campus: campus,
+      };
+    });
+  });
+  const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+  const [buildingRankings, setBuildingRankings] = useState<Array<{
+    building_id: string;
+    total_points: number;
+    total_users: number;
+    rank_position: number;
+  }>>([]);
+  const [currentBuildingRank, setCurrentBuildingRank] = useState<{
+    rank_position: number;
+    points_today: number;
+    total_points: number;
+  } | null>(null);
+
+  // Initialize buildings only on client to prevent hydration mismatch
+  useEffect(() => {
+    setIsMounted(true);
+    // Update buildings with real user counts
+    setBuildings(prevBuildings => 
+      prevBuildings.map(building => ({
+        ...building,
+        activeUsers: getUserCountForBuilding(building.id),
+      }))
+    );
+  }, []);
+
+  // Update activeUsers when connected users change
+  useEffect(() => {
+    setBuildings(prevBuildings => 
+      prevBuildings.map(building => ({
+        ...building,
+        activeUsers: getUserCountForBuilding(building.id),
+      }))
+    );
+  }, [connectedUsers, getUserCountForBuilding]);
+
+  // Load user's building session for today on mount
+  useEffect(() => {
+    const loadBuildingSession = async () => {
+      if (!user) {
+        setBuildingLoading(false);
+        return;
+      }
+
+      try {
+        const { data: buildingId, error } = await supabase.rpc('get_user_building_today', {
+          user_uuid: user.id
+        });
+
+        if (error) {
+          console.error('Error loading building session:', error);
+          setBuildingLoading(false);
+          return;
+        }
+
+        if (buildingId) {
+          setSelectedBuilding(buildingId);
+          // Add user to context
+          addUser(buildingId, true);
+        }
+
+        setBuildingLoading(false);
+      } catch (err) {
+        console.error('Error loading building session:', err);
+        setBuildingLoading(false);
+      }
+    };
+
+    loadBuildingSession();
+  }, [user, addUser]);
+
+  // Load building rankings for today
+  useEffect(() => {
+    const loadRankings = async () => {
+      try {
+        const { data: rankings, error } = await supabase.rpc('get_building_rankings_today');
+
+        if (error) {
+          console.error('Error loading building rankings:', error);
+          return;
+        }
+
+        if (rankings) {
+          setBuildingRankings(rankings);
+        }
+      } catch (err) {
+        console.error('Error loading building rankings:', err);
+      }
+    };
+
+    loadRankings();
+    
+    // Refresh rankings every 30 seconds
+    const interval = setInterval(loadRankings, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Load current building's rank when building is selected
+  useEffect(() => {
+    const loadCurrentBuildingRank = async () => {
+      if (!selectedBuilding) {
+        setCurrentBuildingRank(null);
+        return;
+      }
+
+      try {
+        const { data: rankData, error } = await supabase.rpc('get_building_rank_today', {
+          building_id_param: selectedBuilding
+        });
+
+        if (error) {
+          console.error('Error loading building rank:', error);
+          return;
+        }
+
+        if (rankData && rankData.length > 0) {
+          setCurrentBuildingRank({
+            rank_position: rankData[0].rank_position,
+            points_today: rankData[0].points_today,
+            total_points: rankData[0].total_points,
+          });
+        }
+      } catch (err) {
+        console.error('Error loading building rank:', err);
+      }
+    };
+
+    loadCurrentBuildingRank();
+    
+    // Refresh rank every 30 seconds
+    const interval = setInterval(loadCurrentBuildingRank, 30000);
+    return () => clearInterval(interval);
+  }, [selectedBuilding]);
+
+  const currentBuilding = buildings.find(b => b.id === selectedBuilding);
+  const onlineCount = totalConnectedUsers;
+
+  const handleDetectLocation = async () => {
+    setIsDetecting(true);
+    setLocationError(null);
+    
+    // Check for HTTPS (required for geolocation in production)
+    const isSecureContext = typeof window !== 'undefined' && 
+      (window.location.protocol === 'https:' || 
+       window.location.hostname === 'localhost' || 
+       window.location.hostname === '127.0.0.1');
+    
+    // If we're not using HTTPS, show clear message
+    if (!isSecureContext) {
+      const errorMsg = 'Geolocation requires HTTPS. Use https:// or localhost to detect your location.';
+      console.warn(errorMsg);
+      setLocationError(errorMsg);
+      setIsDetecting(false);
+      setHasLocationPermission(false);
+      return;
+    }
+    
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by your browser.');
+      setIsDetecting(false);
+      setHasLocationPermission(false);
+      return;
+    }
+
+    const options: PositionOptions = {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 60000, // Cache for 1 minute
+    };
+    
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        setUserLocation({ lat, lon });
+        setHasLocationPermission(true);
+        
+        // Check which campus is nearest
+        const { nearestCampus, isOnCampus: onCampus, distance } = isOnCampus(lat, lon);
+        
+        // Update buildings with isNear status
+        setBuildings(prevBuildings => 
+          prevBuildings.map(building => ({
+            ...building,
+            isNear: building.id === nearestCampus?.id && onCampus,
+          }))
+        );
+        
+        // Automatically select the nearest campus ONLY if you're actually on campus
+        if (nearestCampus && onCampus) {
+          // Save building session to database (only if not already set for today)
+          if (user) {
+            try {
+              await supabase.rpc('get_or_create_building_session', {
+                user_uuid: user.id,
+                building_id_param: nearestCampus.id
+              });
+            } catch (err) {
+              console.error('Error saving building session:', err);
+            }
+          }
+          
+          setSelectedBuilding(nearestCampus.id);
+          // Add user to context (only with verified location)
+          addUser(nearestCampus.id, true);
+        } else {
+          // Not on campus - show error message
+          setLocationError(
+            `You are not on any Howest campus. Nearest campus is ${nearestCampus?.name || 'unknown'} (${distance || 0}m away). Please enable location and be on campus to continue.`
+          );
+        }
+        
+        setIsDetecting(false);
+      },
+      (error) => {
+        const errorCode = error?.code ?? 'UNKNOWN';
+        const errorMessage = error?.message ?? 'No error message available';
+        
+        setIsDetecting(false);
+        setHasLocationPermission(false);
+        
+        // Specific error handling
+        let userErrorMessage: string | null = null;
+        
+        // Check for HTTPS/secure origin error
+        if (errorMessage.includes('secure origins') || 
+            errorMessage.includes('Only secure origins') ||
+            errorMessage.includes('getCurrentPosition') && errorCode === 1) {
+          userErrorMessage = 'Geolocation requires HTTPS. Use https:// or localhost to detect your location.';
+        } else {
+          switch (errorCode) {
+            case 1: // PERMISSION_DENIED
+            case error?.PERMISSION_DENIED:
+              userErrorMessage = 'Geolocation access denied. Check your browser settings and grant access.';
+              break;
+            case 2: // POSITION_UNAVAILABLE
+            case error?.POSITION_UNAVAILABLE:
+              userErrorMessage = 'Location information not available. Check your GPS/WiFi settings.';
+              break;
+            case 3: // TIMEOUT
+            case error?.TIMEOUT:
+              userErrorMessage = 'Location request timeout. Please try again.';
+              break;
+            default:
+              userErrorMessage = 'Location could not be determined. Make sure you use HTTPS or localhost.';
+          }
+        }
+        
+        setLocationError(userErrorMessage);
+        // NO fallback selection - user must use location
+      },
+      options
+    );
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowWelcome(false), 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'home':
+        return (
+          <div className="space-y-8">
+            {/* Welcome section */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-center space-y-4"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+              <h1 className="font-display text-3xl md:text-4xl text-primary text-glow mt-4">
+                WELCOME, NERD
+              </h1>
+              <p className="text-muted-foreground max-w-md mx-auto">
+                Connect with your fellow students, win challenges and show which building is the coolest.
+              </p>
+              
+              {buildingLoading && (
+                <div className="flex flex-col items-center gap-4">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground">Loading your building...</p>
+                </div>
+              )}
+              
+              {!selectedBuilding && !buildingLoading && (
+                <div className="flex flex-col items-center gap-4">
+                  <Button 
+                    onClick={handleDetectLocation}
+                    variant="neon"
+                    size="lg"
+                    disabled={isDetecting}
+                    className="mt-4"
+                  >
+                    {isDetecting ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        SCANNING...
+                      </>
+                    ) : (
+                      <>
+                        <MapPin className="w-5 h-5" />
+                        DETECT MY BUILDING
+                      </>
+                    )}
+                  </Button>
+                  {locationError && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="max-w-md px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm text-center"
+                    >
+                      {locationError}
+                    </motion.div>
+                  )}
+                </div>
+              )}
+            </motion.div>
+
+            {/* Building selector */}
+            <BuildingSelector
+              buildings={buildings}
+              selectedBuilding={selectedBuilding}
+              isDetecting={isDetecting}
+              hasLocationPermission={hasLocationPermission}
+              userLocation={userLocation}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+            {/* Quick stats when building selected */}
+            {selectedBuilding && currentBuilding && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-6 rounded-xl bg-card border border-border"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-display text-lg text-primary">TODAY&apos;S_PROGRESS</h3>
+                  <div className="flex items-center gap-2">
+                    {currentBuildingRank && (
+                      <span className={`text-xs px-2 py-1 rounded font-bold ${
+                        currentBuildingRank.rank_position === 1 ? 'bg-yellow-500/20 text-yellow-500' :
+                        currentBuildingRank.rank_position === 2 ? 'bg-gray-400/20 text-gray-400' :
+                        currentBuildingRank.rank_position === 3 ? 'bg-amber-600/20 text-amber-600' :
+                        'bg-muted text-muted-foreground'
+                      }`}>
+                        {currentBuildingRank.rank_position === 1 ? '🥇 1st' :
+                         currentBuildingRank.rank_position === 2 ? '🥈 2nd' :
+                         currentBuildingRank.rank_position === 3 ? '🥉 3rd' :
+                         `#${currentBuildingRank.rank_position}`}
+                      </span>
+                    )}
+                    <span className={`text-sm font-bold ${
+                      currentBuilding.color === 'green' ? 'text-building-a' :
+                      currentBuilding.color === 'cyan' ? 'text-building-b' :
+                      currentBuilding.color === 'magenta' ? 'text-building-c' :
+                      'text-building-d'
+                    }`}>
+                      {currentBuilding.name}
+                    </span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <div className="font-display text-2xl text-foreground">{currentBuilding.activeUsers}</div>
+                    <div className="text-xs text-muted-foreground">Active now</div>
+                  </div>
+                  <div>
+                    <div className="font-display text-2xl text-foreground">
+                      {currentBuildingRank?.total_points || 0}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Total points</div>
+                  </div>
+                  <div>
+                    <div className={`font-display text-2xl ${
+                      currentBuildingRank && currentBuildingRank.points_today > 0 ? 'text-primary' : 'text-foreground'
+                    }`}>
+                      {currentBuildingRank ? `+${currentBuildingRank.points_today}` : '+0'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Pts today</div>
+                  </div>
+                </div>
+                {buildingRankings.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <div className="text-xs text-muted-foreground mb-2">RANKINGS</div>
+                    <div className="flex items-center justify-between gap-2">
+                      {buildingRankings.slice(0, 3).map((building, index) => {
+                        const buildingInfo = buildings.find(b => b.id === building.building_id);
+                        const isCurrentBuilding = building.building_id === selectedBuilding;
+                        return (
+                          <div
+                            key={building.building_id}
+                            className={`flex-1 text-center p-2 rounded ${
+                              isCurrentBuilding ? 'bg-primary/10 border border-primary' : 'bg-muted/30'
+                            }`}
+                          >
+                            <div className={`text-xs font-bold ${
+                              buildingInfo?.color === 'green' ? 'text-building-a' :
+                              buildingInfo?.color === 'cyan' ? 'text-building-b' :
+                              buildingInfo?.color === 'magenta' ? 'text-building-c' :
+                              'text-building-d'
+                            }`}>
+                              {index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'} {buildingInfo?.code || building.building_id}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {building.total_points} pts
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </div>
+        );
+
+      case 'chat':
+        return selectedBuilding ? (
+          <div className="h-[calc(100vh-180px)] rounded-xl overflow-hidden border border-border bg-card">
+            <GlobalChat 
+              currentBuilding={currentBuilding?.code || ''} 
+              buildingColor={currentBuilding?.color || 'green'}
+            />
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <MapPin className="w-12 h-12 text-muted-foreground mb-4" />
+            <p className="text-muted-foreground">Select a building first to join the chat</p>
+          </div>
+        );
+
+      case 'challenges':
+        return <DailyChallenges />;
+
+      case 'leaderboard':
+        return <Leaderboard />;
+
+      case 'profile':
+        return <UserProfile />;
+
+      default:
+        return null;
+    }
+  };
+
+  // Show login screen if not authenticated
+  if (!authLoading && !user) {
+    return <LoginScreen />;
+  }
+
+  // Show loading while checking auth or loading profile
+  if (authLoading || (user && profileLoading)) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground font-mono">LOADING...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show profile setup if authenticated but no profile (only after profile has been checked)
+  if (!authLoading && !profileLoading && user && !profile && !profileSetupComplete) {
+    return (
+      <ProfileSetup 
+        onComplete={() => {
+          setProfileSetupComplete(true);
+          // Reload to get the updated profile
+          window.location.reload();
+        }} 
+      />
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background relative overflow-hidden">
+      {/* Matrix background */}
+      <MatrixRain />
+
+      {/* Welcome animation */}
+      <AnimatePresence>
+        {showWelcome && (
+          <motion.div
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center"
           >
-            Documentation
-          </a>
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 1.2, opacity: 0 }}
+              transition={{ duration: 0.5 }}
+              className="text-center"
+            >
+              <h1 className="font-display text-5xl md:text-7xl text-primary text-glow glitch mb-4">
+                NERD.HUB
+              </h1>
+              <p className="text-muted-foreground typing cursor-blink">
+                Initializing connection...
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Header */}
+      <TerminalHeader 
+        buildingName={currentBuilding?.name}
+        onlineCount={onlineCount}
+      />
+
+      {/* Main content */}
+      <main className="relative z-10 pt-20 pb-24 px-4">
+        <div className="container mx-auto max-w-4xl">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+            >
+              {renderContent()}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </main>
+
+      {/* Navigation */}
+      <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
+
+      {/* Scanlines overlay */}
+      <div className="fixed inset-0 pointer-events-none scanlines opacity-30 z-50" />
     </div>
   );
 }

@@ -1,0 +1,255 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Dark terminal theme */
+    --background: 220 20% 6%;
+    --foreground: 142 70% 80%;
+    
+    --card: 220 20% 9%;
+    --card-foreground: 142 70% 80%;
+    
+    --popover: 220 20% 8%;
+    --popover-foreground: 142 70% 80%;
+    
+    /* Neon green primary */
+    --primary: 142 70% 45%;
+    --primary-foreground: 220 20% 6%;
+    
+    /* Cyan secondary */
+    --secondary: 185 75% 35%;
+    --secondary-foreground: 185 75% 95%;
+    
+    /* Muted terminal gray */
+    --muted: 220 15% 15%;
+    --muted-foreground: 142 30% 55%;
+    
+    /* Accent magenta/pink */
+    --accent: 320 75% 55%;
+    --accent-foreground: 320 75% 95%;
+    
+    /* Warning/destructive orange-red */
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --border: 142 40% 20%;
+    --input: 220 20% 12%;
+    --ring: 142 70% 45%;
+    
+    --radius: 0.5rem;
+    
+    /* Custom colors */
+    --neon-green: 142 70% 45%;
+    --neon-cyan: 185 75% 50%;
+    --neon-magenta: 320 75% 55%;
+    --neon-yellow: 55 90% 55%;
+    --terminal-bg: 220 20% 6%;
+    --terminal-border: 142 40% 25%;
+    
+    /* Building colors */
+    --building-a: 142 70% 45%;
+    --building-b: 185 75% 50%;
+    --building-c: 320 75% 55%;
+    --building-d: 55 90% 55%;
+    
+    /* Gradients */
+    --gradient-neon: linear-gradient(135deg, hsl(142 70% 45%), hsl(185 75% 50%));
+    --gradient-cyber: linear-gradient(135deg, hsl(320 75% 55%), hsl(280 70% 50%));
+    --gradient-terminal: linear-gradient(180deg, hsl(220 20% 8%), hsl(220 20% 4%));
+    
+    /* Shadows */
+    --glow-green: 0 0 20px hsl(142 70% 45% / 0.5);
+    --glow-cyan: 0 0 20px hsl(185 75% 50% / 0.5);
+    --glow-magenta: 0 0 20px hsl(320 75% 55% / 0.5);
+
+    --sidebar-background: 220 20% 8%;
+    --sidebar-foreground: 142 70% 80%;
+    --sidebar-primary: 142 70% 45%;
+    --sidebar-primary-foreground: 220 20% 6%;
+    --sidebar-accent: 220 20% 12%;
+    --sidebar-accent-foreground: 142 70% 80%;
+    --sidebar-border: 142 40% 20%;
+    --sidebar-ring: 142 70% 45%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: 'JetBrains Mono', monospace;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Orbitron', sans-serif;
+  }
+}
+
+@layer utilities {
+  /* Glitch effect */
+  .glitch {
+    animation: glitch 2s infinite;
+  }
+  
+  @keyframes glitch {
+    0%, 90%, 100% {
+      transform: translate(0);
+      filter: hue-rotate(0deg);
+    }
+    92% {
+      transform: translate(-2px, 1px);
+      filter: hue-rotate(90deg);
+    }
+    94% {
+      transform: translate(2px, -1px);
+      filter: hue-rotate(-90deg);
+    }
+    96% {
+      transform: translate(-1px, 2px);
+    }
+    98% {
+      transform: translate(1px, -2px);
+    }
+  }
+  
+  /* Scanlines */
+  .scanlines::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      hsl(var(--neon-green) / 0.03) 2px,
+      hsl(var(--neon-green) / 0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 10;
+  }
+  
+  /* Neon text glow */
+  .text-glow {
+    text-shadow: 
+      0 0 5px currentColor,
+      0 0 10px currentColor,
+      0 0 20px currentColor;
+  }
+  
+  .text-glow-sm {
+    text-shadow: 
+      0 0 3px currentColor,
+      0 0 6px currentColor;
+  }
+  
+  /* Terminal cursor blink */
+  .cursor-blink::after {
+    content: '█';
+    animation: blink 1s step-end infinite;
+  }
+  
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
+  
+  /* Typing animation */
+  .typing {
+    overflow: hidden;
+    white-space: nowrap;
+    animation: typing 2s steps(30, end);
+  }
+  
+  @keyframes typing {
+    from { width: 0; }
+    to { width: 100%; }
+  }
+  
+  /* Matrix rain effect container */
+  .matrix-bg {
+    background: 
+      radial-gradient(ellipse at 50% 0%, hsl(var(--neon-green) / 0.1) 0%, transparent 50%),
+      hsl(var(--background));
+  }
+  
+  /* Pulse animation */
+  .pulse-neon {
+    animation: pulse-neon 2s ease-in-out infinite;
+  }
+  
+  @keyframes pulse-neon {
+    0%, 100% {
+      box-shadow: 0 0 5px hsl(var(--primary)), 0 0 10px hsl(var(--primary) / 0.5);
+    }
+    50% {
+      box-shadow: 0 0 15px hsl(var(--primary)), 0 0 30px hsl(var(--primary) / 0.7);
+    }
+  }
+  
+  /* Floating animation */
+  .float {
+    animation: float 3s ease-in-out infinite;
+  }
+  
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  
+  /* Border animation */
+  .border-animate {
+    background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--secondary)), hsl(var(--accent)), hsl(var(--primary)));
+    background-size: 300% 100%;
+    animation: border-flow 3s linear infinite;
+  }
+  
+  @keyframes border-flow {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+  }
+  
+  /* Card hover effects */
+  .card-hover {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .card-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 0 30px hsl(var(--primary) / 0.3);
+  }
+  
+  /* Gradient text */
+  .gradient-text {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.7);
+}
