@@ -13,21 +13,40 @@ const LoginScreen = () => {
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccess(null);
     setLoading(true);
 
     try {
-      const { error } = isSignUp
-        ? await signUp(email, password)
-        : await signIn(email, password);
-
-      if (error) {
-        setError(error.message || 'An error occurred');
+      if (isSignUp) {
+        const result = await signUp(email, password);
+        
+        if (result.error) {
+          setError(result.error.message || 'An error occurred');
+        } else if (result.requiresEmailConfirmation) {
+          setSuccess(result.message || 'Please check your email to confirm your account');
+        } else if (result.message) {
+          // Account created successfully (email confirmation disabled)
+          setSuccess(result.message);
+          // Clear form after a moment
+          setTimeout(() => {
+            setEmail('');
+            setPassword('');
+            setIsSignUp(false);
+          }, 2000);
+        }
+      } else {
+        const { error } = await signIn(email, password);
+        
+        if (error) {
+          setError(error.message || 'Invalid email or password');
+        }
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred');
@@ -115,6 +134,17 @@ const LoginScreen = () => {
                 </div>
               </div>
 
+              {/* Success message */}
+              {success && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 rounded-lg bg-primary/10 border border-primary/30 text-primary text-sm font-mono"
+                >
+                  ✓ {success}
+                </motion.div>
+              )}
+
               {/* Error message */}
               {error && (
                 <motion.div
@@ -155,6 +185,7 @@ const LoginScreen = () => {
                 onClick={() => {
                   setIsSignUp(!isSignUp);
                   setError(null);
+                  setSuccess(null);
                 }}
                 className="text-sm text-muted-foreground hover:text-primary transition-colors font-mono"
               >

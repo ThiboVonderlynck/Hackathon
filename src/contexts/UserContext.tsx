@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ConnectedUser {
   userId: string;
@@ -28,31 +29,26 @@ const USER_TIMEOUT = 120000; // 2 minuten zonder heartbeat = offline
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [connectedUsers, setConnectedUsers] = useState<ConnectedUser[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const { user } = useAuth();
+  const currentUserId = user?.id || null;
   const socketRef = useRef<Socket | null>(null);
   const currentBuildingRef = useRef<string | null>(null);
   const supabaseChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-  // Generate or retrieve user ID
-  useEffect(() => {
-    let userId = localStorage.getItem(USER_ID_KEY);
-    if (!userId) {
-      userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      localStorage.setItem(USER_ID_KEY, userId);
-    }
-    setCurrentUserId(userId);
-  }, []);
+  // Only initialize Supabase tracking if user is authenticated
+  const isAuthenticated = !!user;
 
   // Initialize Supabase Realtime for online users
   useEffect(() => {
-    if (typeof window === 'undefined' || !currentUserId) return;
+    if (typeof window === 'undefined' || !currentUserId || !isAuthenticated) return;
 
-    // Load initial users from Supabase
+    // Load initial users from Supabase (profiles table)
     const loadInitialUsers = async () => {
       try {
         const { data, error } = await supabase
-          .from('online_users')
-          .select('*')
+          .from('profiles')
+          .select('user_id, current_building_id, location_verified, last_seen')
+          .eq('is_online', true)
           .gte('last_seen', new Date(Date.now() - USER_TIMEOUT).toISOString());
 
         if (error) {
@@ -60,12 +56,14 @@ export function UserProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        const users: ConnectedUser[] = (data || []).map((user) => ({
-          userId: user.user_id,
-          buildingId: user.building_id,
-          timestamp: new Date(user.last_seen).getTime(),
-          locationVerified: user.location_verified,
-        }));
+        const users: ConnectedUser[] = (data || [])
+          .filter((profile) => profile.current_building_id) // Only include users with a building
+          .map((profile) => ({
+            userId: profile.user_id,
+            buildingId: profile.current_building_id!,
+            timestamp: new Date(profile.last_seen).getTime(),
+            locationVerified: profile.location_verified,
+          }));
 
         setConnectedUsers(users);
       } catch (error) {
@@ -75,30 +73,34 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     loadInitialUsers();
 
-    // Setup Supabase Realtime channel
+    // Setup Supabase Realtime channel for profiles table
     const channel = supabase
-      .channel('online_users_changes')
+      .channel('profiles_online_changes')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'online_users',
+          table: 'profiles',
+          filter: 'is_online=eq.true',
         },
         async (payload) => {
           // Reload users when changes occur
           const { data, error } = await supabase
-            .from('online_users')
-            .select('*')
+            .from('profiles')
+            .select('user_id, current_building_id, location_verified, last_seen')
+            .eq('is_online', true)
             .gte('last_seen', new Date(Date.now() - USER_TIMEOUT).toISOString());
 
           if (!error && data) {
-            const users: ConnectedUser[] = data.map((user) => ({
-              userId: user.user_id,
-              buildingId: user.building_id,
-              timestamp: new Date(user.last_seen).getTime(),
-              locationVerified: user.location_verified,
-            }));
+            const users: ConnectedUser[] = data
+              .filter((profile) => profile.current_building_id)
+              .map((profile) => ({
+                userId: profile.user_id,
+                buildingId: profile.current_building_id!,
+                timestamp: new Date(profile.last_seen).getTime(),
+                locationVerified: profile.location_verified,
+              }));
             setConnectedUsers(users);
           }
         }
@@ -191,21 +193,17 @@ export function UserProvider({ children }: { children: ReactNode }) {
     if (!currentUserId || !currentBuildingRef.current) return;
 
     const heartbeat = async () => {
-      // Update via Supabase
+      // Update via Supabase (profiles table)
       try {
         const { error } = await supabase
-          .from('online_users')
-          .upsert(
-            {
-              user_id: currentUserId,
-              building_id: currentBuildingRef.current,
-              location_verified: true,
-              last_seen: new Date().toISOString(),
-            },
-            {
-              onConflict: 'user_id',
-            }
-          );
+          .from('profiles')
+          .update({
+            is_online: true,
+            current_building_id: currentBuildingRef.current,
+            location_verified: true,
+            last_seen: new Date().toISOString(),
+          })
+          .eq('user_id', currentUserId);
 
         if (error) {
           console.error('Error updating heartbeat in Supabase:', error);
@@ -233,9 +231,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const cleanup = async () => {
       // Cleanup in Supabase (database function handles this, but we can also do it client-side)
       try {
-        const { error } = await supabase.rpc('cleanup_old_users');
+        const { error } = await supabase.rpc('cleanup_offline_users');
         if (error) {
-          console.error('Error cleaning up old users:', error);
+          console.error('Error cleaning up offline users:', error);
         }
       } catch (error) {
         console.error('Error calling cleanup function:', error);
@@ -281,11 +279,14 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const removeUser = async (userId: string) => {
-    // Remove from Supabase
+    // Mark as offline in Supabase (profiles table)
     try {
       const { error } = await supabase
-        .from('online_users')
-        .delete()
+        .from('profiles')
+        .update({
+          is_online: false,
+          current_building_id: null,
+        })
         .eq('user_id', userId);
 
       if (error) {
@@ -317,8 +318,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
         const removeUserData = async () => {
           try {
             await supabase
-              .from('online_users')
-              .delete()
+              .from('profiles')
+              .update({
+                is_online: false,
+                current_building_id: null,
+              })
               .eq('user_id', currentUserId);
           } catch (error) {
             console.error('Error removing user on tab close:', error);
@@ -358,21 +362,17 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     currentBuildingRef.current = buildingId;
 
-    // Add/update user in Supabase
+    // Add/update user in Supabase (profiles table)
     try {
       const { error } = await supabase
-        .from('online_users')
-        .upsert(
-          {
-            user_id: currentUserId,
-            building_id: buildingId,
-            location_verified: true,
-            last_seen: new Date().toISOString(),
-          },
-          {
-            onConflict: 'user_id',
-          }
-        );
+        .from('profiles')
+        .update({
+          is_online: true,
+          current_building_id: buildingId,
+          location_verified: true,
+          last_seen: new Date().toISOString(),
+        })
+        .eq('user_id', currentUserId);
 
       if (error) {
         console.error('Error adding user to Supabase:', error);

@@ -354,7 +354,15 @@ export default function Home() {
 
   // Show profile setup if authenticated but no profile
   if (!authLoading && user && !profile && !profileSetupComplete) {
-    return <ProfileSetup onComplete={() => setProfileSetupComplete(true)} />;
+    return (
+      <ProfileSetup 
+        onComplete={() => {
+          setProfileSetupComplete(true);
+          // Reload to get the updated profile
+          window.location.reload();
+        }} 
+      />
+    );
   }
 
   // Show loading while checking auth
