@@ -1,8 +1,10 @@
 import { motion } from 'framer-motion';
 import { User, Trophy, Zap, Calendar, Edit2, Settings, LogOut, Medal, Target, Flame } from 'lucide-react';
 import { Button } from './ui/button';
+import { useAuth } from '@/contexts/AuthContext';
 
 const UserProfile = () => {
+  const { profile, signOut } = useAuth();
   const stats = [
     { label: 'Points', value: '1,234', icon: <Trophy className="w-4 h-4" /> },
     { label: 'Challenges', value: '47', icon: <Target className="w-4 h-4" /> },
@@ -39,7 +41,15 @@ const UserProfile = () => {
         <div className="absolute left-1/2 -translate-x-1/2 -bottom-12">
           <div className="relative">
             <div className="w-24 h-24 rounded-xl bg-card border-4 border-background flex items-center justify-center overflow-hidden">
-              <User className="w-12 h-12 text-primary" />
+              {profile?.avatar_url ? (
+                <img
+                  src={profile.avatar_url}
+                  alt={profile.username}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <User className="w-12 h-12 text-primary" />
+              )}
             </div>
             <button className="absolute -bottom-2 -right-2 p-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
               <Edit2 className="w-3 h-3" />
@@ -50,12 +60,18 @@ const UserProfile = () => {
 
       {/* User info */}
       <div className="pt-14 text-center space-y-2">
-        <h2 className="font-display text-2xl text-primary text-glow-sm">ANONYMOUS_NERD</h2>
-        <p className="text-sm text-muted-foreground">@nerdy_student_42</p>
+        <h2 className="font-display text-2xl text-primary text-glow-sm">
+          {profile?.username?.toUpperCase() || 'ANONYMOUS_NERD'}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          {profile?.tag ? `#${profile.tag}` : '@nerdy_student_42'}
+        </p>
         <div className="flex items-center justify-center gap-2">
-          <span className="px-3 py-1 rounded-full bg-building-a/20 text-building-a text-xs font-medium border border-building-a/30">
-            CORE MEMBER
-          </span>
+          {profile?.tag && (
+            <span className="px-3 py-1 rounded-full bg-building-a/20 text-building-a text-xs font-medium border border-building-a/30">
+              {profile.tag}
+            </span>
+          )}
           <span className="px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs">
             Level 12
           </span>
@@ -156,7 +172,11 @@ const UserProfile = () => {
           <Settings className="w-4 h-4 mr-2" />
           Settings
         </Button>
-        <Button variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10">
+        <Button
+          variant="ghost"
+          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+          onClick={() => signOut()}
+        >
           <LogOut className="w-4 h-4" />
         </Button>
       </motion.div>
