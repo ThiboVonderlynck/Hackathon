@@ -142,14 +142,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     socket.on('connect', () => {
       console.log('Socket.io connected');
-      // If user was already added to a building, rejoin
-      if (currentUserId && currentBuildingRef.current) {
-        socket.emit('user_join', {
-          userId: currentUserId,
-          buildingId: currentBuildingRef.current,
-          locationVerified: true,
-        });
-      }
+      // Don't auto-rejoin here - let addUser handle it when needed
+      // This prevents duplicate user_join events
     });
 
     socket.on('disconnect', () => {

@@ -52,10 +52,15 @@ const BuildingSelector = ({ buildings, selectedBuilding, isDetecting, hasLocatio
           {isDetecting 
             ? 'Scanning for nearby buildings...' 
             : selectedBuilding
-              ? 'Your building is automatically assigned based on your location'
+              ? 'Your building is locked for today. You cannot change it.'
               : 'Enable location to automatically detect your building'}
         </p>
-        {!hasLocationPermission && !isDetecting && (
+        {selectedBuilding && (
+          <p className="text-xs text-muted-foreground mt-2">
+            ⚠️ Your building is saved for today and cannot be changed
+          </p>
+        )}
+        {!hasLocationPermission && !isDetecting && !selectedBuilding && (
           <p className="text-xs text-destructive/80 mt-2">
             ⚠️ Buildings are automatically assigned based on your location
           </p>

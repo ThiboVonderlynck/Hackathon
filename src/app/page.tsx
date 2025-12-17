@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { howestCampuses, isOnCampus } from '@/data/howestCampuses';
 import { useUsers } from '@/contexts/UserContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 
 type Tab = 'home' | 'chat' | 'challenges' | 'leaderboard' | 'profile';
 
@@ -58,6 +59,7 @@ export default function Home() {
   const [locationError, setLocationError] = useState<string | null>(null);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
   const [profileSetupComplete, setProfileSetupComplete] = useState(false);
+  const [buildingLoading, setBuildingLoading] = useState(true);
   const [buildings, setBuildings] = useState(() => {
     // Initialize with fixed values to prevent hydration mismatch
     // Will be updated on client mount
@@ -107,10 +109,45 @@ export default function Home() {
     );
   }, [connectedUsers, getUserCountForBuilding]);
 
+  // Load user's building session for today on mount
+  useEffect(() => {
+    const loadBuildingSession = async () => {
+      if (!user) {
+        setBuildingLoading(false);
+        return;
+      }
+
+      try {
+        const { data: buildingId, error } = await supabase.rpc('get_user_building_today', {
+          user_uuid: user.id
+        });
+
+        if (error) {
+          console.error('Error loading building session:', error);
+          setBuildingLoading(false);
+          return;
+        }
+
+        if (buildingId) {
+          setSelectedBuilding(buildingId);
+          // Add user to context
+          addUser(buildingId, true);
+        }
+
+        setBuildingLoading(false);
+      } catch (err) {
+        console.error('Error loading building session:', err);
+        setBuildingLoading(false);
+      }
+    };
+
+    loadBuildingSession();
+  }, [user, addUser]);
+
   const currentBuilding = buildings.find(b => b.id === selectedBuilding);
   const onlineCount = totalConnectedUsers;
 
-  const handleDetectLocation = () => {
+  const handleDetectLocation = async () => {
     setIsDetecting(true);
     setLocationError(null);
     
@@ -144,7 +181,7 @@ export default function Home() {
     };
     
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const lat = position.coords.latitude;
         const lon = position.coords.longitude;
         setUserLocation({ lat, lon });
@@ -163,6 +200,18 @@ export default function Home() {
         
         // Automatically select the nearest campus ONLY if you're actually on campus
         if (nearestCampus && onCampus) {
+          // Save building session to database (only if not already set for today)
+          if (user) {
+            try {
+              await supabase.rpc('get_or_create_building_session', {
+                user_uuid: user.id,
+                building_id_param: nearestCampus.id
+              });
+            } catch (err) {
+              console.error('Error saving building session:', err);
+            }
+          }
+          
           setSelectedBuilding(nearestCampus.id);
           // Add user to context (only with verified location)
           addUser(nearestCampus.id, true);
@@ -239,7 +288,14 @@ export default function Home() {
                 Connect with your fellow students, win challenges and show which building is the coolest.
               </p>
               
-              {!selectedBuilding && (
+              {buildingLoading && (
+                <div className="flex flex-col items-center gap-4">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground">Loading your building...</p>
+                </div>
+              )}
+              
+              {!selectedBuilding && !buildingLoading && (
                 <div className="flex flex-col items-center gap-4">
                   <Button 
                     onClick={handleDetectLocation}
