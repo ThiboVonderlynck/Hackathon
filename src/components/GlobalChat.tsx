@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Smile, Hash, AtSign } from 'lucide-react';
 import { Button } from './ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { supabase } from '@/lib/supabase';
 import { useUsers } from '@/contexts/UserContext';
 
@@ -34,12 +36,29 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string>('');
+  const [mentionIndex, setMentionIndex] = useState<number>(-1);
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState<number>(0);
+  const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { connectedUsers } = useUsers();
   
   // Get current user ID from localStorage
   const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('nerdhub_user_id') : null;
   const username = currentUserId ? generateUsername(currentUserId) : 'Anonymous';
+  
+  // Get unique usernames from messages
+  const availableUsers = Array.from(
+    new Set(messages.map((msg) => msg.user))
+  ).filter((user) => user !== username).sort();
+  
+  // Filter users based on mention query
+  const filteredUsers = mentionQuery
+    ? availableUsers.filter((user) =>
+        user.toLowerCase().includes(mentionQuery.toLowerCase())
+      )
+    : availableUsers;
 
   const colorMap: Record<string, string> = {
     green: 'text-building-a',
@@ -149,6 +168,121 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
+  const onEmojiClick = (emojiData: EmojiClickData) => {
+    setInput((prev) => prev + emojiData.emoji);
+    setShowEmojiPicker(false);
+  };
+
+  // Handle input change and detect @ mentions
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInput(value);
+    
+    // Find @ mention in the input
+    const cursorPosition = e.target.selectionStart || 0;
+    const textBeforeCursor = value.substring(0, cursorPosition);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      // Check if there's a space after @ (meaning mention ended)
+      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      if (!textAfterAt.includes(' ')) {
+        // We're in a mention
+        setMentionIndex(lastAtIndex);
+        setMentionQuery(textAfterAt);
+        setSelectedMentionIndex(0);
+        return;
+      }
+    }
+    
+    // No active mention
+    setMentionIndex(-1);
+    setMentionQuery('');
+  };
+
+  // Insert mention into input
+  const insertMention = (username: string) => {
+    if (mentionIndex === -1) return;
+    
+    const beforeMention = input.substring(0, mentionIndex);
+    const afterMention = input.substring(mentionIndex).replace(/@\w*/, `@${username} `);
+    const newInput = beforeMention + afterMention;
+    
+    setInput(newInput);
+    setMentionIndex(-1);
+    setMentionQuery('');
+    setSelectedMentionIndex(0);
+    
+    // Focus input and set cursor position
+    setTimeout(() => {
+      inputRef.current?.focus();
+      const newCursorPos = mentionIndex + username.length + 2; // +2 for @ and space
+      inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
+
+  // Handle keyboard navigation in mention dropdown
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (mentionIndex !== -1 && filteredUsers.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedMentionIndex((prev) => 
+          prev < filteredUsers.length - 1 ? prev + 1 : prev
+        );
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedMentionIndex((prev) => (prev > 0 ? prev - 1 : 0));
+      } else if (e.key === 'Enter' && filteredUsers[selectedMentionIndex]) {
+        e.preventDefault();
+        insertMention(filteredUsers[selectedMentionIndex]);
+      } else if (e.key === 'Escape') {
+        setMentionIndex(-1);
+        setMentionQuery('');
+      }
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  // Highlight mentions in message text
+  const renderMessageText = (text: string) => {
+    const mentionRegex = /@(\w+)/g;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = mentionRegex.exec(text)) !== null) {
+      // Add text before mention
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index));
+      }
+      
+      // Add highlighted mention
+      const mentionedUser = match[1];
+      const isUserExists = availableUsers.includes(mentionedUser);
+      parts.push(
+        <span
+          key={match.index}
+          className={`font-semibold ${
+            isUserExists ? 'text-primary' : 'text-muted-foreground'
+          }`}
+        >
+          @{mentionedUser}
+        </span>
+      );
+      
+      lastIndex = match.index + match[0].length;
+    }
+    
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex));
+    }
+    
+    return parts.length > 0 ? parts : text;
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Chat header */}
@@ -210,7 +344,9 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
                       {formatTime(message.timestamp)}
                     </span>
                   </div>
-                  <p className="text-foreground mt-1 break-words">{message.text}</p>
+                  <p className="text-foreground mt-1 break-words">
+                    {renderMessageText(message.text)}
+                  </p>
                 </div>
               </div>
             </motion.div>
@@ -224,20 +360,71 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
         <div className="flex items-center gap-2">
           <div className="flex-1 relative">
             <input
+              ref={inputRef}
               type="text"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
               placeholder="Type your message..."
               className="w-full px-4 py-3 bg-input border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
             />
+            {/* Mention dropdown */}
+            {mentionIndex !== -1 && filteredUsers.length > 0 && (
+              <div className="absolute bottom-full left-0 mb-2 w-64 bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-50">
+                {filteredUsers.map((user, index) => (
+                  <button
+                    key={user}
+                    onClick={() => insertMention(user)}
+                    className={`w-full px-3 py-2 text-left hover:bg-muted transition-colors ${
+                      index === selectedMentionIndex ? 'bg-muted' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-primary">@{user}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-              <button className="text-muted-foreground hover:text-foreground transition-colors">
+              <button 
+                onClick={() => {
+                  const cursorPos = inputRef.current?.selectionStart || input.length;
+                  const newInput = input.slice(0, cursorPos) + '@' + input.slice(cursorPos);
+                  setInput(newInput);
+                  setTimeout(() => {
+                    inputRef.current?.focus();
+                    inputRef.current?.setSelectionRange(cursorPos + 1, cursorPos + 1);
+                  }, 0);
+                }}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Mention user"
+                type="button"
+              >
                 <AtSign className="w-4 h-4" />
               </button>
-              <button className="text-muted-foreground hover:text-foreground transition-colors">
-                <Smile className="w-4 h-4" />
-              </button>
+              <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+                <PopoverTrigger asChild>
+                  <button 
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    title="Add emoji"
+                  >
+                    <Smile className="w-4 h-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0 border-border bg-card" align="end" side="top">
+                  <div className="[&_.EmojiPickerReact]:!bg-card [&_.EmojiPickerReact]:!border-border">
+                    <EmojiPicker
+                      onEmojiClick={onEmojiClick}
+                      autoFocusSearch={false}
+                      theme={"dark" as any}
+                      skinTonesDisabled
+                      width={350}
+                      height={400}
+                    />
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
           <Button onClick={handleSend} size="icon" className="shrink-0">
