@@ -9,7 +9,6 @@ import { useUsers } from '@/contexts/UserContext';
 import { ArrowLeft, Loader2, Trophy, Heart } from 'lucide-react';
 import { motion } from 'framer-motion';
 import MatrixRain from '@/components/MatrixRain';
-import { checkCrownBadge } from '@/utils/badgeHelpers';
 
 interface Drawing {
   id: string;
