@@ -1,14 +1,6 @@
-import { useLocation } from "react-router-dom";
-import { useEffect } from "react";
 import Link from "next/link";
 
-const NotFound = () => {
-  const location = useLocation();
-
-  useEffect(() => {
-    console.error("404 Error: User attempted to access non-existent route:", location.pathname);
-  }, [location.pathname]);
-
+export default function NotFound() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted">
       <div className="text-center">
@@ -20,6 +12,5 @@ const NotFound = () => {
       </div>
     </div>
   );
-};
+}
 
-export default NotFound;

@@ -2,6 +2,8 @@ import { motion } from 'framer-motion';
 import { Building2, Users, Trophy, Zap } from 'lucide-react';
 import { Button } from './ui/button';
 
+import type { Campus } from '@/data/howestCampuses';
+
 interface Building {
   id: string;
   name: string;
@@ -10,6 +12,7 @@ interface Building {
   activeUsers: number;
   points: number;
   isNear: boolean;
+  campus?: Campus;
 }
 
 interface BuildingSelectorProps {
