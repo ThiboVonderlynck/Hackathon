@@ -155,39 +155,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(activeUsers));
       });
 
-<<<<<<< HEAD
-    socket.on('connect', () => {
-      console.log('Socket.io connected');
-      // Don't auto-rejoin here - let addUser handle it when needed
-      // This prevents duplicate user_join events
-    });
-
-    socket.on('disconnect', () => {
-      console.log('Socket.io disconnected');
-    });
-
-    socket.on('connect_error', (error) => {
-      console.error('Socket.io connection error:', error);
-    });
-
-    return () => {
-      if (currentUserId) {
-        socket.emit('user_leave', { userId: currentUserId });
-      }
-      socket.disconnect();
-      socketRef.current = null;
-    };
-=======
       socket.on('connect', () => {
         console.log('Socket.io connected');
-        // If user was already added to a building, rejoin
-        if (currentUserId && currentBuildingRef.current) {
-          socket.emit('user_join', {
-            userId: currentUserId,
-            buildingId: currentBuildingRef.current,
-            locationVerified: true,
-          });
-        }
+        // Don't auto-rejoin here - let addUser handle it when needed
+        // This prevents duplicate user_join events
       });
 
       socket.on('disconnect', () => {
@@ -214,7 +185,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
         console.error('Failed to initialize socket.io:', error);
       }
     }
->>>>>>> origin/develop
   }, [currentUserId]);
 
   // Laad gebruikers uit localStorage bij mount
