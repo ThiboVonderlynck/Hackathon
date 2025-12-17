@@ -57,9 +57,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await Promise.race([queryPromise, timeoutPromise]) as any;
       const { data, error } = result || {};
 
-      // Check for rocket badge (first login) - do this before checking for errors
+      // Check for rocket badge and update streak (only on login)
       try {
-        await supabase.rpc('check_rocket_badge', { user_uuid: userId });
+        // Check if this is first login (for rocket badge and XP)
+        const { data: existingBadge } = await supabase
+          .from('user_badges')
+          .select('badge_id')
+          .eq('user_id', userId)
+          .eq('badge_id', 'rocket')
+          .single();
+        
+        const isFirstLogin = !existingBadge;
+        
+        if (isFirstLogin) {
+          // First login: give rocket badge and 10 XP
+          await supabase.rpc('check_rocket_badge', { user_uuid: userId });
+          await supabase.rpc('add_xp', { 
+            user_uuid: userId, 
+            xp_amount: 10,
+            activity_type: 'first-login'
+          });
+        }
+        
+        // Always update streak on login (streak is always at least 1 when logged in)
+        await supabase.rpc('update_streak', { user_uuid: userId });
       } catch (badgeError) {
         // Ignore badge errors (table might not exist yet)
         console.warn('Could not check rocket badge:', badgeError);

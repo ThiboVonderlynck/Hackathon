@@ -3,6 +3,21 @@
 import { supabase } from '@/lib/supabase';
 
 /**
+ * Add XP to user profile
+ */
+export async function addXP(userId: string, amount: number, activityType?: string) {
+  try {
+    await supabase.rpc('add_xp', {
+      user_uuid: userId,
+      xp_amount: amount,
+      activity_type: activityType || null,
+    });
+  } catch (error) {
+    console.error('Error adding XP:', error);
+  }
+}
+
+/**
  * Track that a user has played a game
  */
 export async function trackGamePlay(userId: string, gameType: 'word-chain' | 'meme-battle' | 'art-duel' | 'speed-quiz') {
@@ -18,6 +33,8 @@ export async function trackGamePlay(userId: string, gameType: 'word-chain' | 'me
 
     // Check for gaming console badge
     await supabase.rpc('check_gaming_console_badge', { user_uuid: userId });
+    
+    // No XP for just playing - only for completing games
   } catch (error) {
     console.error('Error tracking game play:', error);
   }
@@ -45,10 +62,16 @@ export async function trackReaction(userId: string, reactionType: 'laugh' | 'lik
 }
 
 /**
- * Update user streak
+ * Update user streak (called when completing activities)
+ * Note: Streak is automatically updated on login via update_streak function
+ * This function also updates the user_streaks table for badge checking
  */
 export async function updateStreak(userId: string) {
   try {
+    // Update streak in profiles table (this handles the main streak logic)
+    await supabase.rpc('update_streak', { user_uuid: userId });
+    
+    // Also update user_streaks table for badge checking
     const today = new Date().toISOString().split('T')[0];
     
     const { data: existingStreak } = await supabase
@@ -74,7 +97,7 @@ export async function updateStreak(userId: string) {
           })
           .eq('user_id', userId);
       } else {
-        // Reset streak
+        // Reset streak (missed a day)
         await supabase
           .from('user_streaks')
           .update({
@@ -84,7 +107,7 @@ export async function updateStreak(userId: string) {
           .eq('user_id', userId);
       }
     } else {
-      // Create new streak
+      // Create new streak (streak is always at least 1)
       await supabase
         .from('user_streaks')
         .insert({
@@ -104,7 +127,7 @@ export async function updateStreak(userId: string) {
 /**
  * Track completed challenge
  */
-export async function trackChallenge(userId: string, challengeType: string) {
+export async function trackChallenge(userId: string, challengeType: string, xpReward: number = 25) {
   try {
     await supabase
       .from('user_challenges')
@@ -112,6 +135,15 @@ export async function trackChallenge(userId: string, challengeType: string) {
         user_id: userId,
         challenge_type: challengeType,
       });
+
+    // Increment challenge count
+    await supabase.rpc('increment_challenge_count', { user_uuid: userId });
+    
+    // Update streak
+    await updateStreak(userId);
+    
+    // Add XP for completing challenge
+    await addXP(userId, xpReward, `challenge-${challengeType}`);
 
     // Check for ninja badge
     await supabase.rpc('check_ninja_badge', { user_uuid: userId });

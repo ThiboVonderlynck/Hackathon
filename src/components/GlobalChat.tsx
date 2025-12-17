@@ -145,8 +145,21 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Check if message contains a code chain code (32 character alphanumeric)
+  const containsCodeChainCode = (text: string): boolean => {
+    // Match 32 character alphanumeric codes (A-Z0-9)
+    const codePattern = /\b[A-Z0-9]{32}\b/i;
+    return codePattern.test(text);
+  };
+
   const handleSend = async () => {
     if (!input.trim() || !currentUserId || !supabase) return;
+
+    // Block code chain codes in chat
+    if (containsCodeChainCode(input.trim())) {
+      setError('Sharing Code Chain codes in chat is forbidden! Share your code in person.');
+      return;
+    }
 
     try {
       const { error: insertError } = await supabase.from('messages').insert({
@@ -160,6 +173,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
       if (insertError) throw insertError;
 
       setInput('');
+      setError(null);
     } catch (err) {
       console.error('Error sending message:', err);
       setError('Failed to send message. Please try again.');
@@ -247,17 +261,21 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
     }
   };
 
-  // Highlight mentions in message text
+  // Highlight mentions in message text and filter code chain codes
   const renderMessageText = (text: string) => {
+    // First, filter out code chain codes (32 character alphanumeric)
+    const codePattern = /\b[A-Z0-9]{32}\b/gi;
+    const filteredText = text.replace(codePattern, '[CODE_BLOCKED]');
+    
     const mentionRegex = /@(\w+)/g;
     const parts = [];
     let lastIndex = 0;
     let match;
 
-    while ((match = mentionRegex.exec(text)) !== null) {
+    while ((match = mentionRegex.exec(filteredText)) !== null) {
       // Add text before mention
       if (match.index > lastIndex) {
-        parts.push(text.substring(lastIndex, match.index));
+        parts.push(filteredText.substring(lastIndex, match.index));
       }
       
       // Add highlighted mention
@@ -278,11 +296,11 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
     }
     
     // Add remaining text
-    if (lastIndex < text.length) {
-      parts.push(text.substring(lastIndex));
+    if (lastIndex < filteredText.length) {
+      parts.push(filteredText.substring(lastIndex));
     }
     
-    return parts.length > 0 ? parts : text;
+    return parts.length > 0 ? parts : filteredText;
   };
 
   return (
