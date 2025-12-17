@@ -11,6 +11,10 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { useRouter } from "next/navigation";
+import { useUsers } from "@/contexts/UserContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
+import { useEffect, useState } from "react";
 interface Challenge {
   id: string;
   title: string;
@@ -25,6 +29,41 @@ interface Challenge {
 
 const DailyChallenges = () => {
   const router = useRouter();
+  const { connectedUsers } = useUsers();
+  const { user } = useAuth();
+  const [hasBuilding, setHasBuilding] = useState(false);
+  const [checkingBuilding, setCheckingBuilding] = useState(true);
+  
+  // Check if user has a building (from database session)
+  useEffect(() => {
+    const checkBuilding = async () => {
+      if (!user) {
+        setHasBuilding(false);
+        setCheckingBuilding(false);
+        return;
+      }
+
+      try {
+        const { data: buildingId, error } = await supabase.rpc('get_user_building_today', {
+          user_uuid: user.id
+        });
+
+        if (error) {
+          console.error('Error checking building:', error);
+          setHasBuilding(false);
+        } else {
+          setHasBuilding(!!buildingId);
+        }
+      } catch (err) {
+        console.error('Error checking building:', err);
+        setHasBuilding(false);
+      } finally {
+        setCheckingBuilding(false);
+      }
+    };
+
+    checkBuilding();
+  }, [user]);
   const challenges: Challenge[] = [
     {
       id: "1",
@@ -121,6 +160,12 @@ const DailyChallenges = () => {
         <h2 className="font-display text-xl text-primary">DAILY_CHALLENGES</h2>
         <span className="text-xs text-muted-foreground">Reset in 8h 24m</span>
       </div>
+      
+      {!hasBuilding && (
+        <div className="p-4 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive text-sm">
+          ⚠️ You must select a building first before you can play games. Go to Home and detect your location.
+        </div>
+      )}
 
       <div className="grid gap-4">
         {challenges.map((challenge, index) => {
@@ -134,12 +179,16 @@ const DailyChallenges = () => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.1 }}
               className={`
-                relative p-4 rounded-lg border-2 transition-all duration-300 cursor-pointer
+                relative p-4 rounded-lg border-2 transition-all duration-300
+                ${hasBuilding ? "cursor-pointer hover:scale-[1.02]" : "cursor-not-allowed opacity-50"}
                 ${colors.border} ${colors.bg}
                 ${isActive ? colors.shadow : "opacity-70"}
-                hover:scale-[1.02] group
+                group
               `}
               onClick={() => {
+                if (!hasBuilding) {
+                  return;
+                }
                 if (challenge.id === "1") {
                   router.push("/games/word-chain");
                   return;
@@ -207,6 +256,9 @@ const DailyChallenges = () => {
                   className={`shrink-0 ${colors.text} opacity-0 group-hover:opacity-100 transition-opacity`}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (!hasBuilding) {
+                      return;
+                    }
                     if (challenge.id === "1") {
                       router.push("/games/word-chain");
                       return;

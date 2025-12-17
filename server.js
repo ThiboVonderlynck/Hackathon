@@ -67,8 +67,16 @@ app.prepare().then(() => {
         return;
       }
 
-      // Remove user from previous building if exists
+      // Check if user is already in this building (prevent duplicate logs)
       const existingUser = connectedUsers.get(userId);
+      if (existingUser && existingUser.buildingId === buildingId) {
+        // User already in this building, just update timestamp
+        existingUser.timestamp = Date.now();
+        connectedUsers.set(userId, existingUser);
+        return;
+      }
+
+      // Remove user from previous building if exists
       if (existingUser && existingUser.buildingId !== buildingId) {
         // User switched buildings
       }

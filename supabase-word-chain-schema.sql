@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS word_chain_codes (
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   code TEXT NOT NULL UNIQUE, -- 32 character unique code
   word TEXT NOT NULL, -- The word for today
+  building_id TEXT NOT NULL, -- Building where code was created
   date DATE NOT NULL DEFAULT CURRENT_DATE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(user_id, date) -- One code per user per day
@@ -138,10 +139,12 @@ DECLARE
   code_owner_id UUID;
   code_word TEXT;
   code_date DATE;
+  code_building_id TEXT;
+  claimer_building_id TEXT;
   already_claimed BOOLEAN;
 BEGIN
   -- Get code info with id
-  SELECT id, user_id, word, date INTO code_record_id, code_owner_id, code_word, code_date
+  SELECT id, user_id, word, date, building_id INTO code_record_id, code_owner_id, code_word, code_date, code_building_id
   FROM word_chain_codes
   WHERE code = code_to_claim AND date = CURRENT_DATE;
   
@@ -152,6 +155,21 @@ BEGIN
   
   -- Check if user is trying to claim their own word
   IF code_owner_id = claimer_uuid THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Get claimer's building for today
+  SELECT building_id INTO claimer_building_id
+  FROM user_building_sessions
+  WHERE user_id = claimer_uuid AND date = CURRENT_DATE;
+  
+  -- Check if claimer has a building session
+  IF claimer_building_id IS NULL THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Check if both users are in the same building
+  IF code_building_id != claimer_building_id THEN
     RETURN FALSE;
   END IF;
   

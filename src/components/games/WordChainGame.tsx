@@ -8,9 +8,11 @@ import { Card } from "@/components/ui/card";
 import { Copy, Check, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUsers } from "@/contexts/UserContext";
 
 const CodeChainGame = () => {
   const { user } = useAuth();
+  const { connectedUsers } = useUsers();
   const [myCode, setMyCode] = useState<string | null>(null);
   const [inputCode, setInputCode] = useState("");
   const [loading, setLoading] = useState(true);
@@ -91,6 +93,13 @@ const CodeChainGame = () => {
       return;
     }
 
+    // Check if user has a building
+    const myUser = connectedUsers.find(u => u.userId === user.id);
+    if (!myUser) {
+      setError("Please select a building first to generate a code");
+      return;
+    }
+
     setGenerating(true);
     setError(null);
     setSuccess(null);
@@ -115,13 +124,14 @@ const CodeChainGame = () => {
         attempts++;
       }
 
-      // Insert code into database (no word needed)
+      // Insert code into database with building_id
       const { error: insertError } = await supabase
         .from('word_chain_codes')
         .upsert({
           user_id: user.id,
           code: codeToUse,
           word: '', // Empty word, not needed anymore
+          building_id: myUser.buildingId,
           date: new Date().toISOString().split('T')[0],
         }, {
           onConflict: 'user_id,date',
