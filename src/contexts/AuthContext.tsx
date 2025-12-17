@@ -7,9 +7,9 @@ import { User } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-// Dev helper: disable real auth and use a fake user so you can access the app
-// Set to false later when you want real Supabase login again.
-const AUTH_DISABLED = true;
+// Dev helper: set to true to bypass real Supabase auth and use a mock user
+// For real Supabase login, keep this FALSE.
+const AUTH_DISABLED = false;
 const MOCK_USER_ID = 'dev-user-id';
 const MOCK_USER = {
   id: MOCK_USER_ID,
@@ -43,6 +43,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(true);
+
+  const MOCK_PROFILE: Profile = {
+    id: MOCK_USER_ID,
+    user_id: MOCK_USER_ID,
+    username: 'Dev User',
+    avatar_url: null,
+    tag: 'DEV#0001',
+    created_at: new Date().toISOString(),
+  };
 
   const loadProfile = async (userId: string) => {
     setProfileLoading(true);
@@ -137,17 +146,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // In dev mode: skip Supabase completely and use a fake user
     if (AUTH_DISABLED) {
-      const fakeProfile: Profile = {
-        id: MOCK_USER_ID,
-        user_id: MOCK_USER_ID,
-        username: 'Dev User',
-        avatar_url: null,
-        tag: 'DEV#0001',
-        created_at: new Date().toISOString(),
-      };
-
       setUser(MOCK_USER);
-      setProfile(fakeProfile);
+      setProfile(MOCK_PROFILE);
       setLoading(false);
       setProfileLoading(false);
       return;
@@ -204,11 +204,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
-
+      
       // Update user immediately
       setUser(session?.user ?? null);
       setLoading(false);
-
+      
       // Load profile in background
       if (session?.user) {
         loadProfile(session.user.id).catch(err => {
@@ -231,6 +231,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (AUTH_DISABLED) {
       // Pretend login worked and keep using the mock user
       setUser(MOCK_USER);
+      setProfile(MOCK_PROFILE);
       return { error: null };
     }
 
@@ -245,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (AUTH_DISABLED) {
       // Skip real sign-up in dev mode
       setUser(MOCK_USER);
+      setProfile(MOCK_PROFILE);
       return {
         error: null,
         requiresEmailConfirmation: false,
@@ -288,8 +290,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     if (AUTH_DISABLED) {
-      // In dev mode: keep mock user, or clear if you prefer
+      // In dev mode you can choose to keep the mock user "logged in"
+      // or clear it. Here we keep it so the app stays accessible.
       setUser(MOCK_USER);
+      setProfile(MOCK_PROFILE);
       return;
     }
 
@@ -299,18 +303,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProfile = async (data: { username?: string; avatar_url?: string; tag?: string }) => {
-    if (AUTH_DISABLED) {
-      // Update local fake profile only
-      setProfile(prev => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          ...data,
-        };
-      });
-      return { error: null };
-    }
-
     if (!user) return { error: { message: 'No user logged in' } };
 
     const { error } = await supabase
