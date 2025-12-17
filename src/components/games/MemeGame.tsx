@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState, ChangeEvent, FormEvent } from "react";
+import { useMemo, useState, useEffect, ChangeEvent, FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { RefreshCw, Image as ImageIcon, Video, Type } from "lucide-react";
+import { Image as ImageIcon, Video, Type } from "lucide-react";
 
 type MemeType = "image" | "video" | "text";
 
@@ -72,50 +72,66 @@ const MemeGame = () => {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [existing, setExisting] = useState<MemeSubmission | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) return null;
-      const parsed = JSON.parse(stored) as MemeSubmission;
-      return parsed;
-    } catch (e) {
-      console.error("Failed to load meme submission", e);
-      return null;
-    }
-  });
-  const [feed, setFeed] = useState<MemeFeedItem[]>(() => {
-    if (typeof window === "undefined") return DEMO_MEMES;
-    try {
-      const stored = localStorage.getItem(FEED_STORAGE_KEY);
-      if (!stored) return DEMO_MEMES;
-      const parsed = JSON.parse(stored) as MemeFeedItem[];
-      return parsed.length > 0 ? parsed : DEMO_MEMES;
-    } catch {
-      return DEMO_MEMES;
-    }
-  });
-  const [votedIds, setVotedIds] = useState<Record<string, boolean>>(() => {
-    if (typeof window === "undefined") return {};
-    try {
-      const raw = localStorage.getItem(VOTES_STORAGE_KEY);
-      return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [existing, setExisting] = useState<MemeSubmission | null>(null);
+  const [feed, setFeed] = useState<MemeFeedItem[]>(DEMO_MEMES);
+  const [votedIds, setVotedIds] = useState<Record<string, boolean>>({});
   const [sortMode, setSortMode] = useState<"newest" | "votes">("newest");
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Load from localStorage after mount to prevent hydration mismatch
+  useEffect(() => {
+    setIsMounted(true);
+    try {
+      // Load existing submission
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as MemeSubmission;
+        setExisting(parsed);
+      }
+
+      // Load feed
+      const feedStored = localStorage.getItem(FEED_STORAGE_KEY);
+      if (feedStored) {
+        const parsed = JSON.parse(feedStored) as MemeFeedItem[];
+        if (parsed.length > 0) {
+          setFeed(parsed);
+        }
+      }
+
+      // Load votes
+      const votesStored = localStorage.getItem(VOTES_STORAGE_KEY);
+      if (votesStored) {
+        const parsed = JSON.parse(votesStored) as Record<string, boolean>;
+        setVotedIds(parsed);
+      }
+    } catch (e) {
+      console.error("Failed to load from localStorage", e);
+    }
+  }, []);
 
   const hasSubmittedToday = useMemo(() => {
-    if (!existing) return false;
-    const last = new Date(existing.createdAt);
     const now = new Date();
-    return (
-      last.getFullYear() === now.getFullYear() &&
-      last.getMonth() === now.getMonth() &&
-      last.getDate() === now.getDate()
+
+    const isSameDay = (timestamp: number) => {
+      const d = new Date(timestamp);
+      return (
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate()
+      );
+    };
+
+    // Check primary stored submission
+    const existingToday = existing ? isSameDay(existing.createdAt) : false;
+
+    // Extra safety: also check the local feed for any meme from this device today
+    // So you really get max 1 meme per device per day, regardless of reset button or type
+    const feedToday = feed.some(
+      (item) => item.author === "You · this device" && isSameDay(item.createdAt)
     );
-  }, [existing]);
+
+    return existingToday || feedToday;
+  }, [existing, feed]);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     setError(null);
@@ -209,16 +225,6 @@ const MemeGame = () => {
     setFile(null);
   };
 
-  const handleResetLocal = () => {
-    // Helper for demo/testing – clears local submission.
-    localStorage.removeItem(STORAGE_KEY);
-    setExisting(null);
-    setError(null);
-    setSuccess(null);
-    setText("");
-    setFile(null);
-    setType(null);
-  };
 
   const handleUpvote = (id: string) => {
     if (typeof window === "undefined") return;
@@ -276,37 +282,27 @@ const MemeGame = () => {
       {/* Existing submission info */}
       {existing && (
         <Card className="p-4 border-border bg-card/80 backdrop-blur-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-[0.2em]">
-                TODAY&apos;S_SUBMISSION
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-[0.2em]">
+              TODAY&apos;S_SUBMISSION
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Type:{" "}
+              <span className="font-semibold uppercase">{existing.type}</span>
+            </p>
+            {existing.text && (
+              <p className="mt-1 text-sm text-foreground line-clamp-3">
+                &ldquo;{existing.text}&rdquo;
               </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Type:{" "}
-                <span className="font-semibold uppercase">{existing.type}</span>
-              </p>
-              {existing.text && (
-                <p className="mt-1 text-sm text-foreground line-clamp-3">
-                  &ldquo;{existing.text}&rdquo;
-                </p>
-              )}
-              {existing.fileName && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  File: {existing.fileName} ({existing.fileType?.split("/")[0]})
-                </p>
-              )}
+            )}
+            {existing.fileName && (
               <p className="mt-1 text-xs text-muted-foreground">
-                Submitted: {formatDate(existing.createdAt)}
+                File: {existing.fileName} ({existing.fileType?.split("/")[0]})
               </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground"
-              onClick={handleResetLocal}
-            >
-              <RefreshCw className="w-4 h-4" />
-            </Button>
+            )}
+            <p className="mt-1 text-xs text-muted-foreground">
+              Submitted: {formatDate(existing.createdAt)}
+            </p>
           </div>
           {hasSubmittedToday && (
             <p className="mt-3 text-xs text-yellow-400">
