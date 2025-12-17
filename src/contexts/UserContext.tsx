@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
 
 interface ConnectedUser {
   userId: string;
@@ -27,6 +28,8 @@ const USER_TIMEOUT = 120000; // 2 minuten zonder heartbeat = offline
 export function UserProvider({ children }: { children: ReactNode }) {
   const [connectedUsers, setConnectedUsers] = useState<ConnectedUser[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const currentBuildingRef = useRef<string | null>(null);
 
   // Generate or retrieve user ID
   useEffect(() => {
@@ -37,6 +40,60 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
     setCurrentUserId(userId);
   }, []);
+
+  // Initialize Socket.io connection
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Connect to Socket.io server
+    const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: 5,
+    });
+
+    socketRef.current = socket;
+
+    // Listen for users updates from server
+    socket.on('users_updated', (users: ConnectedUser[]) => {
+      const now = Date.now();
+      const activeUsers = users.filter(
+        (user) => now - user.timestamp < USER_TIMEOUT
+      );
+      setConnectedUsers(activeUsers);
+      // Also update localStorage as backup
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(activeUsers));
+    });
+
+    socket.on('connect', () => {
+      console.log('Socket.io connected');
+      // If user was already added to a building, rejoin
+      if (currentUserId && currentBuildingRef.current) {
+        socket.emit('user_join', {
+          userId: currentUserId,
+          buildingId: currentBuildingRef.current,
+          locationVerified: true,
+        });
+      }
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Socket.io disconnected');
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Socket.io connection error:', error);
+    });
+
+    return () => {
+      if (currentUserId) {
+        socket.emit('user_leave', { userId: currentUserId });
+      }
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [currentUserId]);
 
   // Laad gebruikers uit localStorage bij mount
   useEffect(() => {
@@ -57,31 +114,20 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Heartbeat: update timestamp van huidige gebruiker
+  // Heartbeat: update timestamp van huidige gebruiker via Socket.io
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || !socketRef.current) return;
 
     const heartbeat = setInterval(() => {
-      setConnectedUsers((prev) => {
-        const updated = prev.map((user) =>
-          user.userId === currentUserId
-            ? { ...user, timestamp: Date.now() }
-            : user
-        );
-        // Filter oude gebruikers
-        const now = Date.now();
-        const active = updated.filter(
-          (user) => now - user.timestamp < USER_TIMEOUT
-        );
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(active));
-        return active;
-      });
+      if (socketRef.current?.connected && currentBuildingRef.current) {
+        socketRef.current.emit('heartbeat', { userId: currentUserId });
+      }
     }, HEARTBEAT_INTERVAL);
 
     return () => clearInterval(heartbeat);
   }, [currentUserId]);
 
-  // Cleanup oude gebruikers periodiek
+  // Cleanup oude gebruikers periodiek (backup, server does this too)
   useEffect(() => {
     const cleanup = setInterval(() => {
       setConnectedUsers((prev) => {
@@ -119,11 +165,15 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const removeUser = (userId: string) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('user_leave', { userId });
+    }
     setConnectedUsers((prev) => {
       const updated = prev.filter((user) => user.userId !== userId);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       return updated;
     });
+    currentBuildingRef.current = null;
   };
 
   // Cleanup bij unmount
@@ -144,24 +194,36 @@ export function UserProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setConnectedUsers((prev) => {
-      // Remove user from other buildings
-      const filtered = prev.filter((user) => user.userId !== currentUserId);
-      
-      // Add to new building
-      const updated = [
-        ...filtered,
-        {
-          userId: currentUserId,
-          buildingId,
-          timestamp: Date.now(),
-          locationVerified: true,
-        },
-      ];
+    currentBuildingRef.current = buildingId;
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      return updated;
-    });
+    // Send to server via Socket.io
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('user_join', {
+        userId: currentUserId,
+        buildingId,
+        locationVerified: true,
+      });
+    } else {
+      // Fallback to localStorage if socket not connected
+      setConnectedUsers((prev) => {
+        // Remove user from other buildings
+        const filtered = prev.filter((user) => user.userId !== currentUserId);
+        
+        // Add to new building
+        const updated = [
+          ...filtered,
+          {
+            userId: currentUserId,
+            buildingId,
+            timestamp: Date.now(),
+            locationVerified: true,
+          },
+        ];
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        return updated;
+      });
+    }
   };
 
   const getUserCountForBuilding = (buildingId: string): number => {
