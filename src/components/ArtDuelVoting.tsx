@@ -274,30 +274,38 @@ const ArtDuelVoting = () => {
   }, [user, sessionId, connectedUsers]);
 
   const handleVote = async (drawingId: string) => {
-    if (!user || !myBuildingId || voting) {
-      console.log('Vote blocked:', { user: !!user, myBuildingId, voting, submissionEnded });
+    if (!user || !myBuildingId) {
+      console.log('Vote blocked: missing user or building', { user: !!user, myBuildingId });
       return;
     }
     
-    // Allow voting even before deadline if user wants to vote early
-    // if (!submissionEnded) {
-    //   console.log('Voting not yet enabled - deadline has not passed');
-    //   return;
-    // }
+    if (voting) {
+      console.log('Vote already in progress');
+      return;
+    }
+
+    // Get drawing to check building
+    const drawing = drawings.find(d => d.id === drawingId);
+    if (!drawing) {
+      console.log('Drawing not found:', drawingId);
+      return;
+    }
+
+    // Only allow voting on drawings from other buildings
+    if (drawing.building_id === myBuildingId) {
+      console.log('Cannot vote on own building');
+      return;
+    }
+
+    // Check if user already voted on this drawing
+    if (drawing.has_voted) {
+      console.log('Already voted on this drawing');
+      return;
+    }
 
     setVoting(drawingId);
 
     try {
-      // Get drawing to check building
-      const drawing = drawings.find(d => d.id === drawingId);
-      if (!drawing) return;
-
-      // Check if user already voted on this drawing
-      if (drawing.has_voted) {
-        console.log('Already voted on this drawing');
-        setVoting(null);
-        return;
-      }
 
       console.log('Inserting vote:', { drawingId, voterId: user.id, voterBuildingId: myBuildingId });
 
