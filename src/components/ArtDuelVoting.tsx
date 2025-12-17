@@ -481,62 +481,70 @@ const ArtDuelVoting = () => {
 
                     {/* Vote count */}
                     <div className="flex items-center justify-between">
-                      <div 
-                        className={`flex items-center gap-2 ${
+                      <button
+                        type="button"
+                        className={`flex items-center gap-2 border-0 bg-transparent p-0 ${
                           drawing.building_id !== myBuildingId && !drawing.has_voted && !voting
                             ? 'cursor-pointer hover:opacity-80 transition-opacity active:scale-95' 
-                            : 'cursor-default'
+                            : 'cursor-default opacity-50'
                         }`}
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          console.log('Heart clicked:', { 
-                            drawingId: drawing.id, 
-                            buildingId: drawing.building_id, 
-                            myBuildingId, 
-                            hasVoted: drawing.has_voted, 
-                            voting 
-                          });
+                          console.log('=== HEART CLICKED ===');
+                          console.log('Drawing ID:', drawing.id);
+                          console.log('Drawing building:', drawing.building_id);
+                          console.log('My building:', myBuildingId);
+                          console.log('Has voted:', drawing.has_voted);
+                          console.log('Voting state:', voting);
                           
                           if (drawing.building_id === myBuildingId) {
-                            console.log('Cannot vote on own building');
+                            console.log('❌ Cannot vote on own building');
                             return;
                           }
                           
                           if (drawing.has_voted) {
-                            console.log('Already voted');
+                            console.log('❌ Already voted');
                             return;
                           }
                           
                           if (voting) {
-                            console.log('Vote in progress');
+                            console.log('❌ Vote in progress');
                             return;
                           }
                           
-                          console.log('Calling handleVote');
+                          console.log('✅ Calling handleVote');
                           handleVote(drawing.id);
                         }}
-                        onMouseDown={(e) => e.preventDefault()}
+                        disabled={drawing.building_id === myBuildingId || drawing.has_voted || !!voting}
                         title={drawing.building_id === myBuildingId 
                           ? 'Your Building' 
                           : drawing.has_voted 
                             ? 'You already voted' 
                             : 'Click to vote'}
                         style={{ 
-                          pointerEvents: drawing.building_id !== myBuildingId && !drawing.has_voted && !voting ? 'auto' : 'none',
-                          userSelect: 'none'
+                          userSelect: 'none',
+                          WebkitUserSelect: 'none',
+                          outline: 'none'
                         }}
                       >
-                        <Heart className={`w-4 h-4 ${drawing.has_voted ? 'text-destructive fill-destructive' : 'text-muted-foreground'}`} />
+                        <Heart 
+                          className={`w-4 h-4 ${drawing.has_voted ? 'text-destructive fill-destructive' : 'text-muted-foreground'}`}
+                        />
                         <span className="text-sm font-mono">{drawing.vote_count} votes</span>
-                      </div>
+                      </button>
 
                       {/* Vote button - only show for other buildings */}
                       {drawing.building_id !== myBuildingId && (
                         <Button
                           size="sm"
                           variant={drawing.has_voted ? 'outline' : 'default'}
-                          onClick={() => handleVote(drawing.id)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log('Vote button clicked');
+                            handleVote(drawing.id);
+                          }}
                           disabled={drawing.has_voted || voting === drawing.id}
                           className="text-xs"
                         >
