@@ -113,12 +113,12 @@ export function calculateDistance(
     Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  return R * c; // Afstand in meters
+  return R * c; // Distance in meters
 }
 
 /**
- * Check of een locatie binnen een campus radius valt
- * Retourneert altijd de dichtstbijzijnde campus, ook als je binnen meerdere radii bent
+ * Check if a location falls within a campus radius
+ * Always returns the nearest campus, even if you're within multiple radii
  */
 export function isOnCampus(
   userLat: number,
