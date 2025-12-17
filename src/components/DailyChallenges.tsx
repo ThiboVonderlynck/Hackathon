@@ -92,7 +92,7 @@ const DailyChallenges = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="font-display text-xl text-primary">// DAILY_CHALLENGES</h2>
+        <h2 className="font-display text-xl text-primary">DAILY_CHALLENGES</h2>
         <span className="text-xs text-muted-foreground">
           Reset in 8h 24m
         </span>

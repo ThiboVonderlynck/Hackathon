@@ -91,7 +91,7 @@ const UserProfile = () => {
         className="space-y-3"
       >
         <div className="flex items-center justify-between">
-          <h3 className="font-display text-sm text-primary">// BADGES</h3>
+          <h3 className="font-display text-sm text-primary">BADGES</h3>
           <span className="text-xs text-muted-foreground">
             {badges.filter(b => b.earned).length}/{badges.length} earned
           </span>
@@ -123,7 +123,7 @@ const UserProfile = () => {
         transition={{ delay: 0.3 }}
         className="space-y-3"
       >
-        <h3 className="font-display text-sm text-primary">// RECENT_ACTIVITY</h3>
+        <h3 className="font-display text-sm text-primary">RECENT_ACTIVITY</h3>
         <div className="space-y-2">
           {recentActivity.map((activity, index) => (
             <div

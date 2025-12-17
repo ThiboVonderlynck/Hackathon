@@ -50,7 +50,7 @@ const Leaderboard = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Trophy className="w-5 h-5 text-neon-yellow" />
-          <h2 className="font-display text-xl text-primary">// LEADERBOARD</h2>
+          <h2 className="font-display text-xl text-primary">LEADERBOARD</h2>
         </div>
         <span className="text-xs text-muted-foreground">
           Updated live

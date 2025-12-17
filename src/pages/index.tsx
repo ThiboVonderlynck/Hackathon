@@ -102,7 +102,7 @@ const Index = () => {
                 className="p-6 rounded-xl bg-card border border-border"
               >
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-display text-lg text-primary">// TODAY'S_PROGRESS</h3>
+                  <h3 className="font-display text-lg text-primary">TODAY&apos;S_PROGRESS</h3>
                   <span className={`text-sm font-bold ${
                     currentBuilding.color === 'green' ? 'text-building-a' :
                     currentBuilding.color === 'cyan' ? 'text-building-b' :

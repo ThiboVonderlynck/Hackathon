@@ -17,6 +17,8 @@ interface GlobalChatProps {
   buildingColor: string;
 }
 
+const now = Date.now();
+
 const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -25,7 +27,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
       userColor: 'green',
       building: 'CORE',
       text: 'Wie doet er mee met de meme challenge?',
-      timestamp: new Date(Date.now() - 120000),
+      timestamp: new Date(now - 120000),
     },
     {
       id: '2',
@@ -33,7 +35,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
       userColor: 'cyan',
       building: 'WEIDE',
       text: 'Just deployed my first edge function 🚀',
-      timestamp: new Date(Date.now() - 60000),
+      timestamp: new Date(now - 60000),
     },
     {
       id: '3',
@@ -41,7 +43,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
       userColor: 'magenta',
       building: 'STATION',
       text: '01001000 01101001 (that means Hi)',
-      timestamp: new Date(Date.now() - 30000),
+      timestamp: new Date(now - 30000),
     },
     {
       id: '4',
@@ -49,7 +51,7 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
       userColor: 'yellow',
       building: 'B-BLOK',
       text: 'Iemand zin om samen te lunchen in de core?',
-      timestamp: new Date(),
+      timestamp: new Date(now),
     },
   ]);
   const [input, setInput] = useState('');
