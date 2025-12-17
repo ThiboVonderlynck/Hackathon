@@ -136,6 +136,10 @@ const DailyChallenges = () => {
                   router.push("/games/meme-battle");
                   return;
                 }
+                if (challenge.id === "3") {
+                  router.push("/games/art-duel");
+                  return;
+                }
               }}
             >
               {isActive && (
@@ -189,6 +193,10 @@ const DailyChallenges = () => {
                     }
                     if (challenge.id === "2") {
                       router.push("/games/meme-battle");
+                      return;
+                    }
+                    if (challenge.id === "3") {
+                      router.push("/games/art-duel");
                       return;
                     }
                   }}

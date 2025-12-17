@@ -151,7 +151,7 @@ export default function Home() {
         setHasLocationPermission(true);
         
         // Check which campus is nearest
-        const { nearestCampus, isOnCampus: onCampus } = isOnCampus(lat, lon);
+        const { nearestCampus, isOnCampus: onCampus, distance } = isOnCampus(lat, lon);
         
         // Update buildings with isNear status
         setBuildings(prevBuildings => 
@@ -161,15 +161,16 @@ export default function Home() {
           }))
         );
         
-        // Automatically select the nearest campus if you're on campus
+        // Automatically select the nearest campus ONLY if you're actually on campus
         if (nearestCampus && onCampus) {
           setSelectedBuilding(nearestCampus.id);
           // Add user to context (only with verified location)
           addUser(nearestCampus.id, true);
-        } else if (nearestCampus) {
-          // Not on campus, but close enough for selection
-          setSelectedBuilding(nearestCampus.id);
-          addUser(nearestCampus.id, true);
+        } else {
+          // Not on campus - show error message
+          setLocationError(
+            `You are not on any Howest campus. Nearest campus is ${nearestCampus?.name || 'unknown'} (${distance || 0}m away). Please enable location and be on campus to continue.`
+          );
         }
         
         setIsDetecting(false);
