@@ -51,7 +51,7 @@ const mapCampusesToBuildings = () => {
 
 export default function Home() {
   const { addUser, getUserCountForBuilding, totalConnectedUsers, connectedUsers } = useUsers();
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading, profileLoading } = useAuth();
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [isDetecting, setIsDetecting] = useState(false);
@@ -86,6 +86,17 @@ export default function Home() {
   });
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [buildingRankings, setBuildingRankings] = useState<Array<{
+    building_id: string;
+    total_points: number;
+    total_users: number;
+    rank_position: number;
+  }>>([]);
+  const [currentBuildingRank, setCurrentBuildingRank] = useState<{
+    rank_position: number;
+    points_today: number;
+    total_points: number;
+  } | null>(null);
 
   // Initialize buildings only on client to prevent hydration mismatch
   useEffect(() => {
@@ -143,6 +154,69 @@ export default function Home() {
 
     loadBuildingSession();
   }, [user, addUser]);
+
+  // Load building rankings for today
+  useEffect(() => {
+    const loadRankings = async () => {
+      try {
+        const { data: rankings, error } = await supabase.rpc('get_building_rankings_today');
+
+        if (error) {
+          console.error('Error loading building rankings:', error);
+          return;
+        }
+
+        if (rankings) {
+          setBuildingRankings(rankings);
+        }
+      } catch (err) {
+        console.error('Error loading building rankings:', err);
+      }
+    };
+
+    loadRankings();
+    
+    // Refresh rankings every 30 seconds
+    const interval = setInterval(loadRankings, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Load current building's rank when building is selected
+  useEffect(() => {
+    const loadCurrentBuildingRank = async () => {
+      if (!selectedBuilding) {
+        setCurrentBuildingRank(null);
+        return;
+      }
+
+      try {
+        const { data: rankData, error } = await supabase.rpc('get_building_rank_today', {
+          building_id_param: selectedBuilding
+        });
+
+        if (error) {
+          console.error('Error loading building rank:', error);
+          return;
+        }
+
+        if (rankData && rankData.length > 0) {
+          setCurrentBuildingRank({
+            rank_position: rankData[0].rank_position,
+            points_today: rankData[0].points_today,
+            total_points: rankData[0].total_points,
+          });
+        }
+      } catch (err) {
+        console.error('Error loading building rank:', err);
+      }
+    };
+
+    loadCurrentBuildingRank();
+    
+    // Refresh rank every 30 seconds
+    const interval = setInterval(loadCurrentBuildingRank, 30000);
+    return () => clearInterval(interval);
+  }, [selectedBuilding]);
 
   const currentBuilding = buildings.find(b => b.id === selectedBuilding);
   const onlineCount = totalConnectedUsers;
@@ -347,14 +421,29 @@ export default function Home() {
               >
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-display text-lg text-primary">TODAY&apos;S_PROGRESS</h3>
-                  <span className={`text-sm font-bold ${
-                    currentBuilding.color === 'green' ? 'text-building-a' :
-                    currentBuilding.color === 'cyan' ? 'text-building-b' :
-                    currentBuilding.color === 'magenta' ? 'text-building-c' :
-                    'text-building-d'
-                  }`}>
-                    {currentBuilding.name}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {currentBuildingRank && (
+                      <span className={`text-xs px-2 py-1 rounded font-bold ${
+                        currentBuildingRank.rank_position === 1 ? 'bg-yellow-500/20 text-yellow-500' :
+                        currentBuildingRank.rank_position === 2 ? 'bg-gray-400/20 text-gray-400' :
+                        currentBuildingRank.rank_position === 3 ? 'bg-amber-600/20 text-amber-600' :
+                        'bg-muted text-muted-foreground'
+                      }`}>
+                        {currentBuildingRank.rank_position === 1 ? '🥇 1st' :
+                         currentBuildingRank.rank_position === 2 ? '🥈 2nd' :
+                         currentBuildingRank.rank_position === 3 ? '🥉 3rd' :
+                         `#${currentBuildingRank.rank_position}`}
+                      </span>
+                    )}
+                    <span className={`text-sm font-bold ${
+                      currentBuilding.color === 'green' ? 'text-building-a' :
+                      currentBuilding.color === 'cyan' ? 'text-building-b' :
+                      currentBuilding.color === 'magenta' ? 'text-building-c' :
+                      'text-building-d'
+                    }`}>
+                      {currentBuilding.name}
+                    </span>
+                  </div>
                 </div>
                 <div className="grid grid-cols-3 gap-4 text-center">
                   <div>
@@ -362,14 +451,51 @@ export default function Home() {
                     <div className="text-xs text-muted-foreground">Active now</div>
                   </div>
                   <div>
-                    <div className="font-display text-2xl text-foreground">3</div>
-                    <div className="text-xs text-muted-foreground">Challenges</div>
+                    <div className="font-display text-2xl text-foreground">
+                      {currentBuildingRank?.total_points || 0}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Total points</div>
                   </div>
                   <div>
-                    <div className="font-display text-2xl text-foreground">+125</div>
+                    <div className={`font-display text-2xl ${
+                      currentBuildingRank && currentBuildingRank.points_today > 0 ? 'text-primary' : 'text-foreground'
+                    }`}>
+                      {currentBuildingRank ? `+${currentBuildingRank.points_today}` : '+0'}
+                    </div>
                     <div className="text-xs text-muted-foreground">Pts today</div>
                   </div>
                 </div>
+                {buildingRankings.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <div className="text-xs text-muted-foreground mb-2">RANKINGS</div>
+                    <div className="flex items-center justify-between gap-2">
+                      {buildingRankings.slice(0, 3).map((building, index) => {
+                        const buildingInfo = buildings.find(b => b.id === building.building_id);
+                        const isCurrentBuilding = building.building_id === selectedBuilding;
+                        return (
+                          <div
+                            key={building.building_id}
+                            className={`flex-1 text-center p-2 rounded ${
+                              isCurrentBuilding ? 'bg-primary/10 border border-primary' : 'bg-muted/30'
+                            }`}
+                          >
+                            <div className={`text-xs font-bold ${
+                              buildingInfo?.color === 'green' ? 'text-building-a' :
+                              buildingInfo?.color === 'cyan' ? 'text-building-b' :
+                              buildingInfo?.color === 'magenta' ? 'text-building-c' :
+                              'text-building-d'
+                            }`}>
+                              {index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'} {buildingInfo?.code || building.building_id}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {building.total_points} pts
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
           </div>
@@ -409,8 +535,20 @@ export default function Home() {
     return <LoginScreen />;
   }
 
-  // Show profile setup if authenticated but no profile
-  if (!authLoading && user && !profile && !profileSetupComplete) {
+  // Show loading while checking auth or loading profile
+  if (authLoading || (user && profileLoading)) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground font-mono">LOADING...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show profile setup if authenticated but no profile (only after profile has been checked)
+  if (!authLoading && !profileLoading && user && !profile && !profileSetupComplete) {
     return (
       <ProfileSetup 
         onComplete={() => {
@@ -419,18 +557,6 @@ export default function Home() {
           window.location.reload();
         }} 
       />
-    );
-  }
-
-  // Show loading while checking auth
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground font-mono">LOADING...</p>
-        </div>
-      </div>
     );
   }
 

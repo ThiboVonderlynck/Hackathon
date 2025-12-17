@@ -20,6 +20,7 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  profileLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string) => Promise<{ error: any; requiresEmailConfirmation?: boolean; message?: string }>;
   signOut: () => Promise<void>;
@@ -32,13 +33,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const loadProfile = async (userId: string) => {
+    setProfileLoading(true);
     try {
       // Check if Supabase is properly configured
       if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
         console.warn('Supabase not configured, skipping profile load');
         setProfile(null);
+        setProfileLoading(false);
         return;
       }
 
@@ -115,9 +119,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error('Error loading profile:', error);
         setProfile(null);
       }
+    } finally {
+      setProfileLoading(false);
     }
-    // Note: We don't set loading to false here because this is a background operation
-    // Loading is already set to false after the auth check completes
   };
 
   // Load user and profile on mount
@@ -146,15 +150,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Always set loading to false after auth check, even if profile fails
         setLoading(false);
 
-        // Load profile in background (non-blocking)
+        // Load profile and wait for it to complete before showing UI
         if (session?.user) {
-          // Don't await - let it load in background
-          loadProfile(session.user.id).catch(err => {
-            console.error('Background profile load failed:', err);
-            // Profile load failure shouldn't block the app
+          await loadProfile(session.user.id).catch(err => {
+            console.error('Profile load failed:', err);
+            setProfileLoading(false);
           });
         } else {
           setProfile(null);
+          setProfileLoading(false);
         }
       } catch (error: any) {
         console.error('Error initializing auth:', error);
@@ -182,9 +186,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (session?.user) {
         loadProfile(session.user.id).catch(err => {
           console.error('Background profile load failed:', err);
+          setProfileLoading(false);
         });
       } else {
         setProfile(null);
+        setProfileLoading(false);
       }
     });
 
@@ -272,6 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         profile,
         loading,
+        profileLoading,
         signIn,
         signUp,
         signOut,
