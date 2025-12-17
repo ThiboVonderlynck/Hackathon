@@ -274,8 +274,17 @@ const ArtDuelVoting = () => {
   }, [user, sessionId, connectedUsers]);
 
   const handleVote = async (drawingId: string) => {
-    if (!user || !myBuildingId) {
-      console.log('Vote blocked: missing user or building', { user: !!user, myBuildingId });
+    console.log('handleVote called:', { drawingId, user: !!user, myBuildingId, voting });
+    
+    if (!user) {
+      console.error('Vote blocked: no user');
+      alert('Please log in to vote');
+      return;
+    }
+    
+    if (!myBuildingId) {
+      console.error('Vote blocked: no building selected');
+      alert('Please select a building first');
       return;
     }
     
@@ -287,7 +296,7 @@ const ArtDuelVoting = () => {
     // Get drawing to check building
     const drawing = drawings.find(d => d.id === drawingId);
     if (!drawing) {
-      console.log('Drawing not found:', drawingId);
+      console.error('Drawing not found:', drawingId);
       return;
     }
 
@@ -303,10 +312,10 @@ const ArtDuelVoting = () => {
       return;
     }
 
+    console.log('Setting voting state and inserting vote...');
     setVoting(drawingId);
 
     try {
-
       console.log('Inserting vote:', { drawingId, voterId: user.id, voterBuildingId: myBuildingId });
 
       // Insert vote
@@ -475,19 +484,48 @@ const ArtDuelVoting = () => {
                       <div 
                         className={`flex items-center gap-2 ${
                           drawing.building_id !== myBuildingId && !drawing.has_voted && !voting
-                            ? 'cursor-pointer hover:opacity-80 transition-opacity' 
+                            ? 'cursor-pointer hover:opacity-80 transition-opacity active:scale-95' 
                             : 'cursor-default'
                         }`}
-                        onClick={() => {
-                          if (drawing.building_id !== myBuildingId && !drawing.has_voted && !voting) {
-                            handleVote(drawing.id);
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          console.log('Heart clicked:', { 
+                            drawingId: drawing.id, 
+                            buildingId: drawing.building_id, 
+                            myBuildingId, 
+                            hasVoted: drawing.has_voted, 
+                            voting 
+                          });
+                          
+                          if (drawing.building_id === myBuildingId) {
+                            console.log('Cannot vote on own building');
+                            return;
                           }
+                          
+                          if (drawing.has_voted) {
+                            console.log('Already voted');
+                            return;
+                          }
+                          
+                          if (voting) {
+                            console.log('Vote in progress');
+                            return;
+                          }
+                          
+                          console.log('Calling handleVote');
+                          handleVote(drawing.id);
                         }}
+                        onMouseDown={(e) => e.preventDefault()}
                         title={drawing.building_id === myBuildingId 
                           ? 'Your Building' 
                           : drawing.has_voted 
                             ? 'You already voted' 
                             : 'Click to vote'}
+                        style={{ 
+                          pointerEvents: drawing.building_id !== myBuildingId && !drawing.has_voted && !voting ? 'auto' : 'none',
+                          userSelect: 'none'
+                        }}
                       >
                         <Heart className={`w-4 h-4 ${drawing.has_voted ? 'text-destructive fill-destructive' : 'text-muted-foreground'}`} />
                         <span className="text-sm font-mono">{drawing.vote_count} votes</span>
