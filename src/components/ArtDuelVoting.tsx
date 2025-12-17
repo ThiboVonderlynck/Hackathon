@@ -305,6 +305,13 @@ const ArtDuelVoting = () => {
       return;
     }
 
+    // Check if submission period has ended
+    if (!submissionEnded) {
+      console.log('Voting is disabled until submission period ends');
+      alert(`Voting will begin after ${deadlineHour}:00. Please wait until the submission deadline.`);
+      return;
+    }
+
     // Get drawing to check building
     const drawing = drawings.find(d => d.id === drawingId);
     if (!drawing) {
@@ -312,17 +319,14 @@ const ArtDuelVoting = () => {
       return;
     }
 
-    // Only allow voting on drawings from other buildings (not your own building)
-    if (drawing.building_id === myBuildingId) {
-      console.log('Cannot vote on drawings from your own building');
-      return;
-    }
-    
-    // Also prevent voting on your own drawing
+    // Prevent voting on your own drawing
     if (drawing.user_id === user.id) {
       console.log('Cannot vote on your own drawing');
       return;
     }
+    
+    // Allow voting on drawings from any building (including your own building)
+    // as long as it's not your own drawing
 
     // Check if user already voted on this drawing
     if (drawing.has_voted) {
@@ -502,7 +506,7 @@ const ArtDuelVoting = () => {
                       <button
                         type="button"
                         className={`flex items-center gap-2 border-0 bg-transparent p-0 ${
-                          user && drawing.user_id !== user.id && drawing.building_id !== myBuildingId && !drawing.has_voted && !voting
+                          user && drawing.user_id !== user.id && !drawing.has_voted && !voting && submissionEnded
                             ? 'cursor-pointer hover:opacity-80 transition-opacity active:scale-95' 
                             : 'cursor-default opacity-50'
                         }`}
@@ -525,11 +529,6 @@ const ArtDuelVoting = () => {
                             return;
                           }
                           
-                          if (drawing.building_id === myBuildingId) {
-                            console.log('❌ Cannot vote on drawings from your own building');
-                            return;
-                          }
-                          
                           if (drawing.has_voted) {
                             console.log('❌ Already voted');
                             return;
@@ -543,9 +542,11 @@ const ArtDuelVoting = () => {
                           console.log('✅ Calling handleVote');
                           handleVote(drawing.id);
                         }}
-                        disabled={!user || drawing.user_id === user.id || drawing.building_id === myBuildingId || drawing.has_voted || !!voting}
+                        disabled={!user || drawing.user_id === user.id || drawing.has_voted || !!voting || !submissionEnded}
                         title={!user
                           ? 'Please log in'
+                          : !submissionEnded
+                            ? `Voting begins after ${deadlineHour}:00`
                           : drawing.user_id === user.id
                             ? 'Your Drawing' 
                             : drawing.building_id === myBuildingId
@@ -565,8 +566,8 @@ const ArtDuelVoting = () => {
                         <span className="text-sm font-mono">{drawing.vote_count} votes</span>
                       </button>
 
-                      {/* Vote button - only show for other users' drawings from other buildings */}
-                      {user && drawing.user_id !== user.id && drawing.building_id !== myBuildingId && (
+                      {/* Vote button - show for other users' drawings (from any building) */}
+                      {user && drawing.user_id !== user.id && submissionEnded && (
                         <Button
                           size="sm"
                           variant={drawing.has_voted ? 'outline' : 'default'}
@@ -576,7 +577,7 @@ const ArtDuelVoting = () => {
                             console.log('Vote button clicked');
                             handleVote(drawing.id);
                           }}
-                          disabled={drawing.has_voted || voting === drawing.id}
+                          disabled={drawing.has_voted || voting === drawing.id || !submissionEnded}
                           className="text-xs"
                         >
                           {drawing.has_voted ? 'Voted' : voting === drawing.id ? 'Voting...' : 'Vote'}
@@ -606,7 +607,7 @@ const ArtDuelVoting = () => {
 
           {/* Info */}
           <div className="text-center text-sm text-muted-foreground">
-            <p>You can vote on drawings from other buildings. Voting ends at the end of the day.</p>
+            <p>You can vote on drawings from any building (except your own). Voting ends at the end of the day.</p>
           </div>
         </div>
       </div>
