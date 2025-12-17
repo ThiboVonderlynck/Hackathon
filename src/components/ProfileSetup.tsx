@@ -84,7 +84,7 @@ const ProfileSetup = ({ onComplete }: { onComplete: () => void }) => {
       const { error: updateError } = await updateProfile({
         username: username.trim(),
         tag,
-        avatar_url: avatarUrl,
+        avatar_url: avatarUrl || undefined,
       });
 
       if (updateError) {
