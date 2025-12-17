@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { supabase } from '@/lib/supabase';
 import { useUsers } from '@/contexts/UserContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Message {
   id: string;
@@ -43,10 +44,11 @@ const GlobalChat = ({ currentBuilding, buildingColor }: GlobalChatProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { connectedUsers } = useUsers();
+  const { user, profile } = useAuth();
   
-  // Get current user ID from localStorage
-  const currentUserId = typeof window !== 'undefined' ? localStorage.getItem('nerdhub_user_id') : null;
-  const username = currentUserId ? generateUsername(currentUserId) : 'Anonymous';
+  // Get current user ID - prefer authenticated user, fallback to localStorage
+  const currentUserId = user?.id || (typeof window !== 'undefined' ? localStorage.getItem('nerdhub_user_id') : null);
+  const username = profile?.username || (currentUserId ? generateUsername(currentUserId) : 'Anonymous');
   
   // Get unique usernames from messages
   const availableUsers = Array.from(
