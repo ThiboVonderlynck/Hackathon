@@ -63,3 +63,55 @@ $$ LANGUAGE plpgsql;
 -- Enable Realtime for the messages table
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
 
+-- Create online_users table for tracking users per building/room
+CREATE TABLE IF NOT EXISTS online_users (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT NOT NULL UNIQUE,
+  building_id TEXT NOT NULL,
+  location_verified BOOLEAN DEFAULT false,
+  last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create index on building_id for efficient queries
+CREATE INDEX IF NOT EXISTS online_users_building_id_idx ON online_users(building_id);
+CREATE INDEX IF NOT EXISTS online_users_last_seen_idx ON online_users(last_seen);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE online_users ENABLE ROW LEVEL SECURITY;
+
+-- Policy: Anyone can read online users
+CREATE POLICY "Anyone can read online users"
+  ON online_users
+  FOR SELECT
+  USING (true);
+
+-- Policy: Anyone can insert/update their own user record
+CREATE POLICY "Anyone can insert online users"
+  ON online_users
+  FOR INSERT
+  WITH CHECK (true);
+
+CREATE POLICY "Anyone can update online users"
+  ON online_users
+  FOR UPDATE
+  USING (true);
+
+-- Policy: Anyone can delete online users (for cleanup)
+CREATE POLICY "Anyone can delete online users"
+  ON online_users
+  FOR DELETE
+  USING (true);
+
+-- Create a function to cleanup old users (older than 2 minutes)
+CREATE OR REPLACE FUNCTION cleanup_old_users()
+RETURNS void AS $$
+BEGIN
+  DELETE FROM online_users
+  WHERE last_seen < NOW() - INTERVAL '2 minutes';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Enable Realtime for the online_users table
+ALTER PUBLICATION supabase_realtime ADD TABLE online_users;
+

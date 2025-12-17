@@ -22,6 +22,11 @@ const createSupabaseClient = () => {
       persistSession: false,
       autoRefreshToken: false,
     },
+    realtime: {
+      params: {
+        eventsPerSecond: 10,
+      },
+    },
   });
 };
 
